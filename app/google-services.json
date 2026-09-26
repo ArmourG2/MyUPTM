@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "897619036861",
+    "project_id": "myuptm-51394",
+    "storage_bucket": "myuptm-51394.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:897619036861:android:13bbf7217132418e3045d4",
+        "android_client_info": {
+          "package_name": "com.myuptm"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "897619036861-l0gbqhv5o71fq92ckn45npjtd743dce1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.myuptm",
+            "certificate_hash": "8f3f6be1ac22ded3d854b24986dfb506d870c551"
+          }
+        },
+        {
+          "client_id": "897619036861-2qfsfvork0c99flmk9tv11di20c71dfl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZVjo10GBa8pr2hO3bUFe56-_41_3iqfE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "897619036861-2qfsfvork0c99flmk9tv11di20c71dfl.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
