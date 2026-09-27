@@ -16,12 +16,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
+import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.PostCard
 import com.myuptm.viewmodel.PostsViewModel
 
 @Composable
 fun PostsScreen(
-    viewModel: PostsViewModel = viewModel()
+    viewModel: PostsViewModel = viewModel(),
+    navController: NavController
 ) {
     val posts by viewModel.posts.collectAsState()
 
@@ -45,7 +48,10 @@ fun PostsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(posts) { post ->
-                PostCard(post)
+                PostCard(
+                    post = post,
+                    onClick = { navController.navigate(MyUptmRoutes.postDetail(post.id)) }
+                )
             }
         }
     }

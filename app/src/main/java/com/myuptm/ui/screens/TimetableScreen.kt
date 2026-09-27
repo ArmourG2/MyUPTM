@@ -1,5 +1,6 @@
 package com.myuptm.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,9 @@ fun TimetableScreen(
             page = todayPage,
             animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing)
         )
+    }
+    BackHandler(enabled = pagerState.currentPage != todayPage) {
+        viewModel.requestReset()
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

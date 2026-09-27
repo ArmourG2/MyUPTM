@@ -60,10 +60,13 @@ fun BottomNavBar(navController: NavHostController) {
                             timetableViewModel.requestReset()
                         }
                     } else {
+                        if (item.route == MyUptmRoutes.TIMETABLE) {
+                            timetableViewModel.requestReset()
+                        }
                         navController.navigate(item.route) {
-                            popUpTo(MyUptmRoutes.HOME) { saveState = true }
+                            popUpTo(MyUptmRoutes.HOME) { saveState = false }
                             launchSingleTop = true
-                            restoreState = true
+                            restoreState = false
                         }
                     }
                 },
