@@ -13,9 +13,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.myuptm.navigation.MyUptmRoutes
+import com.myuptm.viewmodel.TimetableViewModel
 
 /**
  * Definition of one bottom navigation tab.
@@ -39,19 +43,28 @@ fun BottomNavBar(navController: NavHostController) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
+    // 1. Get the Activity-scoped TimetableViewModel (shared with TimetableScreen)
+    val timetableViewModel: TimetableViewModel = viewModel(
+        viewModelStoreOwner = LocalContext.current as ViewModelStoreOwner
+    )
+
     NavigationBar {
         bottomNavItems.forEach { item ->
             NavigationBarItem(
                 selected = currentRoute == item.route,
                 onClick = {
-                    navController.navigate(item.route) {
-                        // Official bottom-nav pattern:
-                        // avoid stacking copies of the same destination
-                        popUpTo(MyUptmRoutes.HOME) {
-                            saveState = true
+                    // 2. Use `item.route` because we are inside the forEach loop
+                    if (currentRoute == item.route) {
+                        // Already on this tab -> re-selection
+                        if (item.route == MyUptmRoutes.TIMETABLE) {
+                            timetableViewModel.requestReset()
                         }
-                        launchSingleTop = true
-                        restoreState = true
+                    } else {
+                        navController.navigate(item.route) {
+                            popUpTo(MyUptmRoutes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 },
                 icon = { Icon(imageVector = item.icon, contentDescription = item.label) },
