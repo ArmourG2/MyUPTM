@@ -42,7 +42,7 @@ fun MyUptmNavHost(
                 }
             )
         }
-        composable(MyUptmRoutes.HOME) { HomeScreen() }
+        composable(MyUptmRoutes.HOME) { HomeScreen(navController = navController) }
         composable(MyUptmRoutes.TIMETABLE) { TimetableScreen() }
         composable(MyUptmRoutes.ATTENDANCE) { AttendanceScreen() }
         composable(MyUptmRoutes.POSTS) { PostsScreen(navController = navController) }

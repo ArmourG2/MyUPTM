@@ -2,13 +2,13 @@ package com.myuptm.domain.model
 
 data class ClassSession(
     val id: String,
-    val dayIndex: Int,              // 0 = Monday, 4 = Friday
+    val dayIndex: Int,
     val subjectName: String,
     val lecturerName: String,
     val venue: String,
     val teachingMedium: TeachingMedium,
-    val startTime: String,          // "09:00"
-    val endTime: String             // "11:00"
+    val startTime: String,
+    val endTime: String
 )
 
 enum class TeachingMedium {
