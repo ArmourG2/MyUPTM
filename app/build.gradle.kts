@@ -14,7 +14,7 @@ android {
 
     defaultConfig {
         applicationId = "com.myuptm"
-        minSdk = 31
+        minSdk = 29
         this.targetSdk = 37
         versionCode = 1
         versionName = "1.0"
@@ -35,6 +35,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -54,4 +55,5 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.lifecycle.viewmodel)
+    implementation(libs.androidx.datastore.preferences)
 }

@@ -47,7 +47,16 @@ fun MyUptmNavHost(
         composable(MyUptmRoutes.ATTENDANCE) { AttendanceScreen() }
         composable(MyUptmRoutes.POSTS) { PostsScreen(navController = navController) }
         composable(MyUptmRoutes.PROFILE) { ProfileScreen(navController = navController) }
-        composable(MyUptmRoutes.SETTINGS) { SettingsScreen(onBackClick = { navController.popBackStack() }) }
+        composable(MyUptmRoutes.SETTINGS) {
+            SettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                onSignOut = {
+                    navController.navigate(MyUptmRoutes.SIGN_IN) {
+                        popUpTo(MyUptmRoutes.HOME) { inclusive = true }
+                    }
+                }
+            )
+        }
 
         composable(
             route = MyUptmRoutes.POST_DETAIL,
