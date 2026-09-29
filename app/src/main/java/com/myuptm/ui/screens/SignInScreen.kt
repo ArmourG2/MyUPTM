@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,12 +16,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/**
- * Sprint 1 shell only.
- * Real Google Sign-In + Firebase Auth is wired in Sprint 4.
- */
 @Composable
-fun SignInScreen(onSignInClick: () -> Unit) {
+fun SignInScreen(onSignInClick: () -> Unit,
+                 errorMessage: String? = null,
+                 isLoading: Boolean = false
+                 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -43,8 +44,24 @@ fun SignInScreen(onSignInClick: () -> Unit) {
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Button(onClick = onSignInClick) {
-            Text(text = "Sign in with Google")
+        Button(
+            onClick = onSignInClick,
+            enabled = !isLoading // We could disable during loading, but for now keep it simple
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            }else {Text(text = "Sign in with Google")}
+        }
+        if (errorMessage != null) {
+            Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 16.dp)
+            )
         }
     }
 }
