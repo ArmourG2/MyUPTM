@@ -41,7 +41,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             // Step 1: Get Google ID token
             val idTokenResult = googleAuthUiClient.signIn(activity)
             if (idTokenResult.isFailure) {
-                _errorMessage.value = "Sign-in cancelled or failed"
+                val e = idTokenResult.exceptionOrNull()
+                android.util.Log.e("AuthDebug", "Credential Manager failed", e)
+                _errorMessage.value = "Sign-in failed: ${e?.message ?: "cancelled"}"
                 _authState.value = AuthState.ERROR
                 return@launch
             }
@@ -50,7 +52,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             // Step 2: Firebase handshake
             val userResult = authRepository.signInWithGoogle(idToken)
             if (userResult.isFailure) {
-                _errorMessage.value = "Firebase authentication failed"
+                _errorMessage.value = userResult.exceptionOrNull()?.message ?: "Unknown"
                 _authState.value = AuthState.ERROR
                 return@launch
             }

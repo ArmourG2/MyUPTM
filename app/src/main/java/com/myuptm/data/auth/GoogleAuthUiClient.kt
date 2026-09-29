@@ -3,6 +3,7 @@ package com.myuptm.data.auth
 import android.app.Activity
 import android.content.Context
 import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -36,10 +37,20 @@ class GoogleAuthUiClient(
             val credential = result.credential
 
             if (credential is GoogleIdTokenCredential) {
-                Result.success(credential.idToken)
-            } else {
-                Result.failure(Exception("Unexpected credential type returned"))
+                return Result.success(credential.idToken)
             }
+
+            if (credential is CustomCredential &&
+                credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+            ) {
+                val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                return Result.success(googleCredential.idToken)
+            }
+
+            return Result.failure(
+                Exception("Unexpected credential type: ${credential::class.simpleName} / ${credential.type}")
+            )
+
         } catch (e: GetCredentialException) {
             Result.failure(e)
         } catch (e: Exception) {
