@@ -112,7 +112,6 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showSignOutDialog = false
-                    viewModel.signOut() // mock seam; Firebase in Sprint 6
                     onSignOut()
                 }) { Text("Log Out") }
             },

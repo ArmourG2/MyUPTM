@@ -1,5 +1,8 @@
 package com.myuptm.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -43,6 +47,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.myuptm.data.repository.MockCloudinaryRepository
+import com.myuptm.domain.repository.FileType
 import com.myuptm.ui.components.QrViewfinder
 import kotlinx.coroutines.launch
 
@@ -52,6 +58,23 @@ fun AttendanceScreen() {
     var pin by remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    var isUploadingPdf by remember { mutableStateOf(false) }
+    var pdfResultMessage by remember { mutableStateOf<String?>(null) }
+
+    val pdfPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            scope.launch {
+                isUploadingPdf = true
+                pdfResultMessage = null
+                val result = MockCloudinaryRepository().uploadFile(it, FileType.PDF)
+                isUploadingPdf = false
+                pdfResultMessage = result.getOrNull()?.let { url -> "Uploaded: $url" } ?: "Upload failed"
+            }
+        }
+    }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
         Column(
@@ -63,6 +86,24 @@ fun AttendanceScreen() {
         ) {
             Spacer(Modifier.height(32.dp))
             Text("Attendance Verification", style = MaterialTheme.typography.headlineSmall)
+
+            Button(
+                onClick = { pdfPickerLauncher.launch("application/pdf") },
+                enabled = !isUploadingPdf,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isUploadingPdf) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (isUploadingPdf) "Uploading Absence Letter..." else "Upload Absence Letter (PDF)")
+            }
+
+            pdfResultMessage?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+            }
+
+            Spacer(Modifier.height(16.dp))
 
             // Animated centre area: QR and PIN swap in the same slot
             Column(

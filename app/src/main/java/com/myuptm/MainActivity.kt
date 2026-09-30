@@ -17,6 +17,7 @@ import com.myuptm.navigation.MyUptmNavHost
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.BottomNavBar
 import com.myuptm.ui.theme.MyUPTMTheme
+import com.myuptm.viewmodel.AuthViewModel
 import com.myuptm.viewmodel.SettingsViewModel
 
 class MainActivity : ComponentActivity() {
@@ -40,16 +41,20 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MyUptmApp() {
     val navController = rememberNavController()
+    val authViewModel: AuthViewModel = viewModel()
+    val userRole by authViewModel.userRole.collectAsState()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-
-    // Sprint 1 rule: bottom nav is hidden only on Sign-In
     val showBottomBar = currentRoute != null && currentRoute != MyUptmRoutes.SIGN_IN
+
 
     Scaffold(
         bottomBar = {
-            if (showBottomBar) {
-                BottomNavBar(navController = navController)
+            if (showBottomBar && userRole != null) {
+                BottomNavBar(
+                    navController = navController,
+                    userRole = userRole!!
+                )
             }
         }
     ) { innerPadding ->
