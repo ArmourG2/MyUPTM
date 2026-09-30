@@ -1,6 +1,10 @@
 package com.myuptm.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,7 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavController
-import com.myuptm.data.repository.MockProfileRepository
+import com.myuptm.data.repository.FirestoreProfileRepository
 import com.myuptm.domain.model.UserRole
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.viewmodel.ProfileViewModel
@@ -47,11 +51,16 @@ import com.myuptm.viewmodel.ProfileViewModel
 fun ProfileScreen(navController: NavController) {
     val profileViewModel: ProfileViewModel = viewModel(
         factory = viewModelFactory {
-            initializer { ProfileViewModel(MockProfileRepository()) }
+            initializer { ProfileViewModel(FirestoreProfileRepository()) }
         }
     )
     val uiState by profileViewModel.uiState.collectAsState()
     val profile = uiState.userProfile
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { profileViewModel.uploadAvatar(it) }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -71,6 +80,7 @@ fun ProfileScreen(navController: NavController) {
             }
         }
 
+
         if (profile == null) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -89,16 +99,29 @@ fun ProfileScreen(navController: NavController) {
                 Box(
                     modifier = Modifier
                         .size(120.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .clickable { imagePickerLauncher.launch("image/*") }, // Opens system image picker
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = profile.initials,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
+                    if (uiState.isUploading) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary)
+                    } else {
+                        Text(
+                            text = profile.initials,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
                 }
+                // This show da text(MOCK) TODO
+                uiState.uploadedImageUrl?.let { url ->
+                    Text("Avatar URL: $url", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+                }
+                uiState.uploadError?.let { err ->
+                    Text("Error: $err", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+
                 Spacer(Modifier.height(16.dp))
                 Text(
                     text = profile.fullName,

@@ -6,11 +6,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.myuptm.data.auth.GoogleAuthUiClient
 import com.myuptm.data.repository.FirebaseAuthRepository
+import com.myuptm.data.repository.FirestoreUserRepository
+import com.myuptm.domain.model.AppUser
 import com.myuptm.domain.model.UserRole
+import com.myuptm.domain.repository.UserRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
 
 enum class AuthState {
     IDLE,
@@ -24,6 +28,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val googleAuthUiClient = GoogleAuthUiClient(application.applicationContext)
     private val authRepository = FirebaseAuthRepository()
 
+    private val userRepository: UserRepository = FirestoreUserRepository()
+
+
+    val isLoggedIn: Boolean
+        get() = authRepository.currentUser != null
+
     private val _authState = MutableStateFlow(AuthState.IDLE)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
@@ -32,6 +42,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _userRole = MutableStateFlow<UserRole?>(null)
     val userRole: StateFlow<UserRole?> = _userRole.asStateFlow()
+    private val _userRecord = MutableStateFlow<AppUser?>(null)
+    val userRecord: StateFlow<AppUser?> = _userRecord.asStateFlow()
+
 
     fun signIn(activity: Activity) {
         viewModelScope.launch {
@@ -56,32 +69,35 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 _authState.value = AuthState.ERROR
                 return@launch
             }
-            val user = userResult.getOrThrow()
+            val firebaseUser = userResult.getOrThrow()
 
-            // Step 3: Determine role from email
-            val email = user.email.orEmpty()
-            val role = determineRole(email)
-
-            if (role == null) {
+            val recordResult = userRepository.fetchUser(firebaseUser.uid)
+            if (recordResult.isFailure) {
                 authRepository.signOut()
-                _errorMessage.value = "This email is not authorized for MyUPTM"
+                _errorMessage.value = "Unable to verify your account right now. Please try again."
                 _authState.value = AuthState.ERROR
                 return@launch
             }
 
-            _userRole.value = role
+            val record = recordResult.getOrNull()
+
+            if (record == null) {
+                authRepository.signOut()
+                _errorMessage.value = "This account is not authorized for MyUPTM"
+                _authState.value = AuthState.ERROR
+                return@launch
+            }
+            if (!record.approved) {
+                authRepository.signOut()
+                _errorMessage.value = "Your account is pending approval."
+                _authState.value = AuthState.ERROR
+                return@launch
+            }
+
+
+            _userRecord.value = record
+            _userRole.value = record.role
             _authState.value = AuthState.SUCCESS
-        }
-    }
-
-    private fun determineRole(email: String): UserRole? {
-        val adminEmails = listOf("akmal2kembar@gmail.com", "akmal2kembar@proton.me")
-
-        return when {
-            email in adminEmails -> UserRole.ADMIN
-            email.endsWith("@uptm.edu.my") -> UserRole.LECTURER
-            email.endsWith("@student.uptm.edu.my") -> UserRole.STUDENT
-            else -> null
         }
     }
 
@@ -94,5 +110,22 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun resetState() {
         _authState.value = AuthState.IDLE
         _errorMessage.value = null
+    }
+    init {
+        // If user is already logged in (e.g., app restart), fetch their role from Firestore
+        if (authRepository.currentUser != null) {
+            viewModelScope.launch {
+                val uid = authRepository.currentUser!!.uid
+                val result = userRepository.fetchUser(uid)
+                result.onSuccess { record ->
+                    if (record != null && record.approved) {
+                        _userRole.value = record.role
+                        _userRecord.value = record
+                    } else {
+                        signOut() // Not approved or not found
+                    }
+                }
+            }
+        }
     }
 }

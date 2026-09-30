@@ -60,6 +60,7 @@ dependencies {
 
     // Import the Firebase BoM (Bill of Materials)
     implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
 
     // Firebase Auth (version is automatically matched to the BoM)
     implementation(libs.firebase.auth)
