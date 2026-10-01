@@ -9,7 +9,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,8 +22,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.myuptm.navigation.MyUptmRoutes.HOME
 import com.myuptm.navigation.MyUptmRoutes.SIGN_IN
+import com.myuptm.domain.model.toPermissions
 import com.myuptm.ui.screens.AttendanceScreen
+import com.myuptm.ui.screens.ClassManagementScreen
 import com.myuptm.ui.screens.HomeScreen
+import com.myuptm.ui.screens.NotificationsScreen
 import com.myuptm.ui.screens.PostDetailScreen
 import com.myuptm.ui.screens.PostsScreen
 import com.myuptm.ui.screens.ProfileScreen
@@ -37,7 +39,9 @@ import com.myuptm.viewmodel.AuthViewModel
 
 /**
  * Single source of truth for all destinations.
- * Sprint 1: Sign-In shell -> 5 placeholder tabs.
+ * Sprint 7B: role/profile gating now flows from AuthViewModel.userRecord (AppUser),
+ * permission decisions live in UserPermissions. The duplicate POSTS registration
+ * from 7A is removed.
  */
 @Composable
 fun MyUptmNavHost(
@@ -47,6 +51,7 @@ fun MyUptmNavHost(
     val authViewModel: AuthViewModel = viewModel()
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
     val errorMessage by authViewModel.errorMessage.collectAsStateWithLifecycle()
+    val userRecord by authViewModel.userRecord.collectAsStateWithLifecycle()
 
     val startDestination = if (authViewModel.isLoggedIn) HOME else SIGN_IN
 
@@ -78,17 +83,25 @@ fun MyUptmNavHost(
             )
         }
         composable(HOME) { HomeScreen(navController = navController) }
-        composable(MyUptmRoutes.TIMETABLE) { TimetableScreen() }
+        composable(MyUptmRoutes.TIMETABLE) {
+            val record = userRecord
+            if (record != null) {
+                TimetableScreen(user = record)
+            } else {
+                LoadingBox()
+            }
+        }
         composable(MyUptmRoutes.ATTENDANCE) { AttendanceScreen() }
         composable(MyUptmRoutes.POSTS) {
-            val authViewModel: AuthViewModel = viewModel()
-            val userRole by authViewModel.userRole.collectAsState()
-
-            if (userRole != null) {
+            val record = userRecord
+            if (record != null) {
                 PostsScreen(
                     navController = navController,
-                    userRole = userRole!!
+                    user = record
                 )
+            } else {
+                // Show this while the role is being fetched from Firestore
+                LoadingBox()
             }
         }
         composable(MyUptmRoutes.PROFILE) { ProfileScreen(navController = navController) }
@@ -100,10 +113,24 @@ fun MyUptmNavHost(
             }
         }
         composable(MyUptmRoutes.CLASS_MANAGEMENT) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Class Management", style = MaterialTheme.typography.headlineMedium)
-                Text("Placeholder for managing classes.", style = MaterialTheme.typography.bodyLarge)
+            val record = userRecord
+            when {
+                record == null -> LoadingBox()
+                record.toPermissions().canManageClassGlobal ->
+                    ClassManagementScreen(ownerEmail = record.email)
+                else -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("You don't manage classes", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
+        }
+        composable(MyUptmRoutes.NOTIFICATIONS) {
+            NotificationsScreen(
+                user = userRecord,
+                onBackClick = { navController.popBackStack() }
+            )
         }
 
         composable(MyUptmRoutes.SETTINGS) {
@@ -125,25 +152,19 @@ fun MyUptmNavHost(
             val postId = backStackEntry.arguments?.getString("postId").orEmpty()
             PostDetailScreen(
                 postId = postId,
+                canRemovePost = userRecord?.toPermissions()?.canRemovePost == true,
                 onBackClick = { navController.popBackStack() }
             )
         }
+    }
+}
 
-        composable(MyUptmRoutes.POSTS) {
-            val authViewModel: AuthViewModel = viewModel()
-            val userRole by authViewModel.userRole.collectAsState()
-
-            if (userRole != null) {
-                PostsScreen(
-                    navController = navController,
-                    userRole = userRole!!
-                )
-            } else {
-                // Show this while the role is being fetched from Firestore
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Loading profile...")
-                }
-            }
-        }
+@Composable
+private fun LoadingBox() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text("Loading profile...")
     }
 }

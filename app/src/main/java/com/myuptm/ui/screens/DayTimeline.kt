@@ -25,22 +25,32 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.myuptm.domain.model.ClassSession
+import com.myuptm.domain.model.PersonalPlan
 import com.myuptm.ui.components.ClassTimelineItem
 import com.myuptm.ui.components.GapTimelineItem
+import com.myuptm.ui.components.PlanTimelineItem
 import com.myuptm.ui.components.toMinutes
 
 private const val GAP_THRESHOLD_MINUTES = 30
+
+// Sprint 7B: a day's items can be official classes or the student's own plans.
+private sealed interface TimelineEntry {
+    data class ClassEntry(val session: ClassSession) : TimelineEntry
+    data class PlanEntry(val plan: PersonalPlan) : TimelineEntry
+}
 
 @Composable
 fun DayTimeline(
     dayIndex: Int,
     isToday: Boolean,
-    classes: List<ClassSession>
+    classes: List<ClassSession>,
+    plans: List<PersonalPlan> = emptyList(),
+    onPlanClick: (PersonalPlan) -> Unit = {}
 ) {
     val dayNames = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
     val dayName = dayNames[dayIndex]
 
-    if (classes.isEmpty()) {
+    if (classes.isEmpty() && plans.isEmpty()) {
         DayOffView(dayName)
         return
     }
@@ -49,6 +59,17 @@ fun DayTimeline(
         val now = java.time.LocalTime.now()
         now.hour * 60 + now.minute
     } else -1
+
+    // Sprint 7B: merge official classes and personal plans, ordered by start time.
+    val entries: List<TimelineEntry> = (
+        classes.map { TimelineEntry.ClassEntry(it) } +
+            plans.map { TimelineEntry.PlanEntry(it) }
+        ).sortedBy { entry ->
+        when (entry) {
+            is TimelineEntry.ClassEntry -> entry.session.startTime
+            is TimelineEntry.PlanEntry -> entry.plan.startTime
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -59,13 +80,17 @@ fun DayTimeline(
         DayHeader(dayName, isToday)
         Spacer(Modifier.height(18.dp))
 
-        classes.forEachIndexed { index, session ->
-            ClassTimelineItem(session)
+        entries.forEachIndexed { index, entry ->
+            when (entry) {
+                is TimelineEntry.ClassEntry -> ClassTimelineItem(entry.session)
+                is TimelineEntry.PlanEntry -> PlanTimelineItem(entry.plan) { onPlanClick(entry.plan) }
+            }
 
-            if (index < classes.lastIndex) {
-                val next = classes[index + 1]
-                val gapStart = session.endTime.toMinutes()
-                val gapEnd = next.startTime.toMinutes()
+            val next = entries.getOrNull(index + 1)
+            // Gaps are only drawn between two consecutive official class items.
+            if (entry is TimelineEntry.ClassEntry && next is TimelineEntry.ClassEntry) {
+                val gapStart = entry.session.endTime.toMinutes()
+                val gapEnd = next.session.startTime.toMinutes()
                 val gapMinutes = gapEnd - gapStart
                 if (gapMinutes >= GAP_THRESHOLD_MINUTES) {
                     val isCurrentGap = isToday && nowMinutes in gapStart until gapEnd
@@ -75,7 +100,7 @@ fun DayTimeline(
         }
 
         Spacer(Modifier.height(2.dp))
-        Footer(classes.size)
+        Footer(classes.size, plans.size)
         Spacer(Modifier.height(40.dp))
     }
 }
@@ -125,9 +150,11 @@ private fun DayOffView(dayName: String) {
 }
 
 @Composable
-private fun Footer(classCount: Int) {
+private fun Footer(classCount: Int, planCount: Int) {
+    val classText = "$classCount class${if (classCount != 1) "es" else ""}"
+    val planText = if (planCount > 0) " · $planCount personal plan${if (planCount != 1) "s" else ""}" else ""
     Text(
-        "No more classes · $classCount class${if (classCount != 1) "es" else ""} today",
+        "No more items · $classText$planText today",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     )

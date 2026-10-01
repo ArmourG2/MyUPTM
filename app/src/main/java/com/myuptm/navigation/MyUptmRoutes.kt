@@ -11,6 +11,7 @@ object MyUptmRoutes {
     const val POST_DETAIL = "post_detail/{postId}"
     const val CLASS_MANAGEMENT = "class_management"
     const val ADMIN_DASHBOARD = "admin_dashboard"
+    const val NOTIFICATIONS = "notifications"
 
     // Helper: substitutes the real id into the pattern
     fun postDetail(postId: String) = "post_detail/$postId"

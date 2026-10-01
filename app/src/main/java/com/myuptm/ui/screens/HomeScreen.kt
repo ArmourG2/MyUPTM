@@ -1,5 +1,10 @@
 package com.myuptm.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
@@ -18,18 +23,20 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavController
+import com.myuptm.data.repository.FirestoreClassRepository
 import com.myuptm.data.repository.MockPostsRepository
-import com.myuptm.data.repository.MockTimetableRepository
 import com.myuptm.domain.model.SupportLinks
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.AnnouncementRow
@@ -45,20 +52,33 @@ fun HomeScreen(navController: NavController) {
     val homeViewModel: HomeViewModel = viewModel(
         factory = viewModelFactory {
             initializer {
-                HomeViewModel(MockTimetableRepository(), MockPostsRepository())
+                // Sprint 7B: classes come from Firestore (global); posts remain mock.
+                HomeViewModel(FirestoreClassRepository(), MockPostsRepository())
             }
         }
     )
     val uiState by homeViewModel.uiState.collectAsState()
+
+    // Sprint 7B: local notifications require POST_NOTIFICATIONS on Android 13+.
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Denied -> in-app inbox still works */ }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Home") },
             actions = {
                 IconButton(
-                    // Placeholder for B-004 (Push Notifications).
-                    // REMOVE before any demo per placeholder rule.
-                    onClick = { }
+                    // Sprint 7B: opens the notification inbox (POC of B-004).
+                    onClick = { navController.navigate(MyUptmRoutes.NOTIFICATIONS) }
                 ) {
                     Icon(Icons.Filled.Notifications, contentDescription = "Notifications")
                 }

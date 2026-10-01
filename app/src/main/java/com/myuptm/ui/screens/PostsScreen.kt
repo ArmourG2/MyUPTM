@@ -23,7 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import com.myuptm.domain.model.UserRole
+import com.myuptm.domain.model.AppUser
+import com.myuptm.domain.model.toPermissions
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.PostCard
 import com.myuptm.viewmodel.PostsViewModel
@@ -32,9 +33,11 @@ import com.myuptm.viewmodel.PostsViewModel
 fun PostsScreen(
     viewModel: PostsViewModel = viewModel(),
     navController: NavController,
-    userRole: UserRole // <-- Added role parameter
+    user: AppUser
 ) {
     val posts by viewModel.posts.collectAsState()
+    // Sprint 7B: only Admin and Lecturer-with-Admin may add posts.
+    val canAddPost = user.toPermissions().canAddPost
 
     // Box allows us to layer the FAB over the LazyColumn
     Box(modifier = Modifier.fillMaxSize()) {
@@ -65,8 +68,7 @@ fun PostsScreen(
             }
         }
 
-        // Only show FAB for Staff/Lecturer/Admin
-        if (userRole != UserRole.STUDENT) {
+        if (canAddPost) {
             FloatingActionButton(
                 onClick = { /* TODO: Navigate to Add Post screen */ },
                 modifier = Modifier

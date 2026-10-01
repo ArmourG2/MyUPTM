@@ -1,15 +1,17 @@
 package com.myuptm.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.myuptm.domain.model.ClassSession
 import com.myuptm.domain.model.Post
 import com.myuptm.domain.model.SupportLink
 import com.myuptm.domain.model.SupportLinks
+import com.myuptm.domain.repository.ClassRepository
 import com.myuptm.domain.repository.PostsRepository
-import com.myuptm.domain.repository.TimetableRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -25,7 +27,7 @@ data class HomeUiState(
 )
 
 class HomeViewModel(
-    private val timetableRepository: TimetableRepository,
+    private val classRepository: ClassRepository,
     private val postsRepository: PostsRepository
 ) : ViewModel() {
 
@@ -33,19 +35,20 @@ class HomeViewModel(
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
-        loadHomeData()
-    }
-
-    private fun loadHomeData() {
-        val now = LocalDateTime.now()
-        val next = findNextClass(timetableRepository.getWeeklyTimetable(), now)
-
-        _uiState.value = HomeUiState(
-            nextClass = next?.first,
-            countdownLabel = buildCountdownLabel(next, now),
-            announcements = postsRepository.getPosts().take(3),
-            supportLinks = SupportLinks.ITEMS
-        )
+        // Sprint 7B: classes are global (Firestore) — stay live so the Next Class
+        // card reflects lecturer edits immediately.
+        viewModelScope.launch {
+            classRepository.observeClasses().collect { classes ->
+                val now = LocalDateTime.now()
+                val next = findNextClass(classes, now)
+                _uiState.value = HomeUiState(
+                    nextClass = next?.first,
+                    countdownLabel = buildCountdownLabel(next, now),
+                    announcements = postsRepository.getPosts().take(3),
+                    supportLinks = SupportLinks.ITEMS
+                )
+            }
+        }
     }
 
     // Returns (session, dayOffset). offset 0 = today, 1 = tomorrow, etc.

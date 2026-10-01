@@ -22,4 +22,10 @@ class PostsViewModel : ViewModel() {
     private fun loadPosts() {
         _posts.value = repository.getPosts()
     }
+
+    // Sprint 7B: entry gated to Admin + Lecturer-with-Admin via UserPermissions.
+    fun removePost(postId: String) {
+        repository.removePost(postId)
+        loadPosts()
+    }
 }

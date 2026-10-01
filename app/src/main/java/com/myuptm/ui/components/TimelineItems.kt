@@ -1,6 +1,7 @@
 package com.myuptm.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.myuptm.domain.model.ClassSession
+import com.myuptm.domain.model.PersonalPlan
 import com.myuptm.domain.model.TeachingMedium
 
 internal fun String.toMinutes(): Int {
@@ -80,6 +82,49 @@ fun ClassTimelineItem(session: ClassSession) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             TagChip(session.venue, isAccent = false)
             TagChip(mediumLabel, isAccent = session.teachingMedium == TeachingMedium.ONLINE)
+        }
+    }
+}
+
+// Sprint 7B: a student's device-local plan, visually distinct from official classes.
+@Composable
+fun PlanTimelineItem(plan: PersonalPlan, onClick: () -> Unit) {
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val duration = plan.endTime.toMinutes() - plan.startTime.toMinutes()
+
+    TimelineItem(dotColor = tertiary, showBranch = true) {
+        Column(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+        ) {
+            // Time with underline
+            Column(Modifier.width(IntrinsicSize.Max)) {
+                Text(
+                    "${plan.startTime} · ${formatDuration(duration)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = onSurfaceVariant
+                )
+                Spacer(Modifier.height(3.dp))
+                Box(Modifier.fillMaxWidth().height(1.5.dp).background(tertiary.copy(alpha = 0.5f)))
+            }
+            Spacer(Modifier.height(12.dp))
+            // Title with underline
+            Column(Modifier.width(IntrinsicSize.Max)) {
+                Text(
+                    plan.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onSurface
+                )
+                Spacer(Modifier.height(3.dp))
+                Box(Modifier.fillMaxWidth().height(2.dp).background(tertiary))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                plan.venue?.let { venue -> TagChip(venue, isAccent = false) }
+                TagChip("MY PLAN", isAccent = true)
+            }
         }
     }
 }

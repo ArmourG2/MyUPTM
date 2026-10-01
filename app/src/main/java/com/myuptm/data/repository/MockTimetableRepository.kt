@@ -4,6 +4,9 @@ import com.myuptm.domain.model.ClassSession
 import com.myuptm.domain.model.TeachingMedium
 import com.myuptm.domain.repository.TimetableRepository
 
+// Sprint 7B: superseded by FirestoreClassRepository — global classes now live in the
+// Firestore "classes" collection (auto-seeded with this same demo data on first read).
+@Deprecated("Superseded by FirestoreClassRepository in Sprint 7B")
 class MockTimetableRepository : TimetableRepository {
 
     override fun getWeeklyTimetable(): List<ClassSession> {
