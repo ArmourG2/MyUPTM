@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+// Sprint 8 Task 1: Daily = one-day pager with date chips; Weekly = full-week board.
+enum class TimetableViewMode { DAILY, WEEKLY }
+
 class TimetableViewModel(application: Application) : AndroidViewModel(application) {
 
     private val classRepository: ClassRepository = FirestoreClassRepository()
@@ -46,8 +49,8 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
         if (user == null || repo == null) flowOf(emptyList()) else repo.observePlans()
     }
 
-    val weeklyPlans: StateFlow<List<List<PersonalPlan>>> = plansFlow
-        .map { plans -> List(7) { day -> plans.filter { it.dayIndex == day } } }
+    // Device-local personal plans (one-time events with concrete dates), students only.
+    val plans: StateFlow<List<PersonalPlan>> = plansFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // Persisted clash warnings for the banner.
@@ -64,6 +67,15 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
     // Incremented when the Timetable tab is re-selected. UI observes this to snap back to today.
     private val _resetTrigger = MutableStateFlow(0)
     val resetTrigger: StateFlow<Int> = _resetTrigger.asStateFlow()
+
+    // ---- Sprint 8 Task 1: view mode + week navigation (Weekly view) ----
+
+    private val _viewMode = MutableStateFlow(TimetableViewMode.DAILY)
+    val viewMode: StateFlow<TimetableViewMode> = _viewMode.asStateFlow()
+
+    // Week offset from the current week (Weekly view arrows only; Daily always shows today).
+    private val _weekOffset = MutableStateFlow(0)
+    val weekOffset: StateFlow<Int> = _weekOffset.asStateFlow()
 
     // Baseline for clash detection: the first non-empty snapshot never warns.
     private var clashBaseline: List<ClassSession>? = null
@@ -84,6 +96,24 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
     // Incremented when the Timetable tab is re-selected. UI observes this to snap back to today.
     fun requestReset() {
         _resetTrigger.value++
+        // Re-entry resets Weekly to the current week as well.
+        _weekOffset.value = 0
+    }
+
+    // ---- Sprint 8 Task 1: view-mode + week navigation API ----
+
+    fun setViewMode(mode: TimetableViewMode) {
+        _viewMode.value = mode
+    }
+
+    // Syncs the Weekly pager's implied week offset into VM state (two-way binding only
+    // writes when the value actually differs, so it never echoes back into the pager).
+    fun syncWeekOffset(offset: Int) {
+        if (_weekOffset.value != offset) _weekOffset.value = offset
+    }
+
+    fun returnToCurrentWeek() {
+        _weekOffset.value = 0
     }
 
     fun clearPlanError() {
@@ -99,14 +129,14 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- Personal plan CRUD (students only) ----
 
-    fun addPlan(title: String, dayIndex: Int, startTime: String, endTime: String, venue: String?) {
+    fun addPlan(title: String, date: java.time.LocalDate, startTime: String, endTime: String, venue: String?) {
         val repo = planRepository ?: return
         _planError.value = null
         if (startTime >= endTime) {
             _planError.value = "End time must be after start time"
             return
         }
-        findConflictingClass(dayIndex, startTime, endTime)?.let { clash ->
+        findConflictingClass(date, startTime, endTime)?.let { clash ->
             _planError.value =
                 "${clash.subjectName} is held ${dayName(clash.dayIndex)} " +
                     "${clash.startTime}–${clash.endTime}. Unable to add the custom plan."
@@ -117,7 +147,7 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
                 PersonalPlan(
                     id = UUID.randomUUID().toString(),
                     title = title.trim(),
-                    dayIndex = dayIndex,
+                    date = date,
                     startTime = startTime,
                     endTime = endTime,
                     venue = venue?.trim()?.ifEmpty { null }
@@ -126,21 +156,28 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun updatePlan(plan: PersonalPlan, title: String, dayIndex: Int, startTime: String, endTime: String, venue: String?) {
+    fun updatePlan(
+        plan: PersonalPlan,
+        title: String,
+        date: java.time.LocalDate,
+        startTime: String,
+        endTime: String,
+        venue: String?
+    ) {
         val repo = planRepository ?: return
         _planError.value = null
         if (startTime >= endTime) {
             _planError.value = "End time must be after start time"
             return
         }
-        findConflictingClass(dayIndex, startTime, endTime)?.let { clash ->
+        findConflictingClass(date, startTime, endTime)?.let { clash ->
             _planError.value =
                 "${clash.subjectName} is held ${dayName(clash.dayIndex)} " +
                     "${clash.startTime}–${clash.endTime}. Unable to keep the plan in this slot."
             return
         }
         viewModelScope.launch {
-            repo.updatePlan(plan.copy(title = title.trim(), dayIndex = dayIndex, startTime = startTime, endTime = endTime, venue = venue?.trim()?.ifEmpty { null }))
+            repo.updatePlan(plan.copy(title = title.trim(), date = date, startTime = startTime, endTime = endTime, venue = venue?.trim()?.ifEmpty { null }))
         }
     }
 
@@ -154,10 +191,10 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch { repo.clearWarnings() }
     }
 
-    // Rule 1: a student cannot place a plan on a slot where a class is held.
-    private fun findConflictingClass(dayIndex: Int, startTime: String, endTime: String): ClassSession? =
+    // Rule 1: a student cannot place a plan on a slot where a class is held (same weekday).
+    private fun findConflictingClass(date: java.time.LocalDate, startTime: String, endTime: String): ClassSession? =
         _weeklyTimetable.value.flatten().firstOrNull { cls ->
-            cls.dayIndex == dayIndex && overlaps(startTime, endTime, cls.startTime, cls.endTime)
+            cls.dayIndex == date.dayOfWeek.value - 1 && overlaps(startTime, endTime, cls.startTime, cls.endTime)
         }
 
     // Rule 2: warn the student when a class is added/moved onto an existing plan.
@@ -176,7 +213,7 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
                 old.startTime != cls.startTime ||
                 old.endTime != cls.endTime
             if (!slotChanged) return@forEach
-            weeklyPlans.value.flatten().forEach { plan ->
+            plans.value.forEach { plan ->
                 if (plan.dayIndex == cls.dayIndex &&
                     overlaps(plan.startTime, plan.endTime, cls.startTime, cls.endTime)
                 ) {

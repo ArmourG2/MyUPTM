@@ -30,7 +30,7 @@ class DataStorePersonalPlanRepository(
     override fun observePlans(): Flow<List<PersonalPlan>> =
         context.plansDataStore.data.map { prefs ->
             prefs[plansKey].orEmpty().mapNotNull(::decodePlan).sortedWith(
-                compareBy({ it.dayIndex }, { it.startTime })
+                compareBy({ it.date }, { it.startTime })
             )
         }
 
@@ -71,12 +71,14 @@ class DataStorePersonalPlanRepository(
         }
     }
 
-    // ---- Encoding: id|dayIndex|start|end|title|venue ----
+    // ---- Encoding: id|epochDay|start|end|title|venue ----
+    // Sprint 8: plans are one-time events, so the record stores the concrete date's
+    // epochDay instead of a weekday index (toFixed= one-off, never recurring).
     // "|" is stripped from user text so records stay parseable.
     private fun encodePlan(plan: PersonalPlan): String =
         listOf(
             plan.id,
-            plan.dayIndex.toString(),
+            plan.date.toEpochDay().toString(),
             plan.startTime,
             plan.endTime,
             sanitize(plan.title),
@@ -89,7 +91,7 @@ class DataStorePersonalPlanRepository(
         return PersonalPlan(
             id = parts[0],
             title = parts[4],
-            dayIndex = parts[1].toIntOrNull() ?: return null,
+            date = parts[1].toLongOrNull()?.let { java.time.LocalDate.ofEpochDay(it) } ?: return null,
             startTime = parts[2],
             endTime = parts[3],
             venue = parts[5].ifEmpty { null }
