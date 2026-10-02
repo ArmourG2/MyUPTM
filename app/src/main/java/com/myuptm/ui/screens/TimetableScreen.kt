@@ -1,14 +1,13 @@
 package com.myuptm.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -18,13 +17,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,7 +34,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -47,6 +48,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,29 +70,34 @@ import com.myuptm.domain.model.toPermissions
 import com.myuptm.ui.components.DayChip
 import com.myuptm.viewmodel.TimetableViewMode
 import com.myuptm.viewmodel.TimetableViewModel
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 
-private val DAY_NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-private val DAY_SHORTS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 // Wireframe day circles run Sunday-first: S M T W T F S → mapped to our Monday-first indexes.
 private val DAY_LETTERS = listOf("S", "M", "T", "W", "T", "F", "S")
 private val CIRCLE_TO_DAY = listOf(6, 0, 1, 2, 3, 4, 5)
 
-// Weekly pager: 61 pages centred on page 30 so swiping feels endless (~±30 weeks).
+// Pagers: pages centred on a base page so swiping feels endless (~±30 days / weeks).
+private const val DAY_PAGES = 61
+private const val DAY_BASE = 30
 private const val WEEK_PAGES = 61
 private const val WEEK_BASE = 30
+// The chip rail covers roughly one month around today (±15 days).
+private const val CHIP_HALF_SPAN = 15
 
 // Prefilled values when opening the add-plan dialog from a grid slot tap (or the FAB).
 // The date is recorded because plans are ONE-TIME events (Sprint 8).
 private data class PlanPrefill(val date: LocalDate, val startTime: String, val endTime: String)
 
-// Sprint 8 Task 1: Daily (chips + single-day grid w/ free bars) and Weekly (swipable week
-// pages). Plans are one-time events; tapping a plan opens an Edit/Delete options popup.
+// Sprint 8 Task 1: Daily (swipable day pages + month chip rail) and Weekly (swipable week
+// pages) — like the Weekly pager. View switch = labelled pill in the top-right corner.
 @Composable
 fun TimetableScreen(
     user: AppUser?,
+    onOpenClassManagement: (() -> Unit)? = null,
     viewModel: TimetableViewModel = viewModel(
         viewModelStoreOwner = LocalContext.current as ViewModelStoreOwner
     )
@@ -100,6 +107,8 @@ fun TimetableScreen(
 
     val isStudent = user?.toPermissions()?.canManagePersonalPlans == true
 
+    val canManageClasses = user?.toPermissions()?.canManageClassGlobal == true
+
     val weeklyTimetable by viewModel.weeklyTimetable.collectAsState()
     val allPlans by viewModel.plans.collectAsState()
     val clashWarnings by viewModel.clashWarnings.collectAsState()
@@ -108,29 +117,41 @@ fun TimetableScreen(
     val viewMode by viewModel.viewMode.collectAsState()
     val weekOffset by viewModel.weekOffset.collectAsState()
 
-    val todayIndex = getCurrentDayIndex()
-    val today = LocalDate.now()
+    // Sprint 8: lecturers see THEIR OWN classes only (plus editable demo seeds);
+    // students see the whole departmental timetable.
+    val visibleTimetable = if (user != null && canManageClasses) {
+        weeklyTimetable.map { day -> day.filter { it.ownerEmail == null || it.ownerEmail == user.email } }
+    } else weeklyTimetable
 
-    // Daily: plain selected-day state (chips tap; no pager).
-    var dailyDayIndex by remember { mutableStateOf(todayIndex) }
+    val today = LocalDate.now()
+    val scope = rememberCoroutineScope()
+
+    // Daily: pager over day pages + mirrored selected page for the chip rail.
+    val dayPagerState = rememberPagerState(initialPage = DAY_BASE, pageCount = { DAY_PAGES })
+    var dailyPage by remember { mutableStateOf(DAY_BASE) }
+    LaunchedEffect(dayPagerState) {
+        snapshotFlow { dayPagerState.currentPage }.collect { dailyPage = it }
+    }
     // Weekly: pager over weeks; VM offset mirrors the settled page.
     val weekPagerState = rememberPagerState(initialPage = WEEK_BASE, pageCount = { WEEK_PAGES })
     val gridScroll = rememberScrollState()
 
-    // Pager → VM (one-way; VM never re-pushes into the pager, avoiding echo loops).
+    // Weekly pager → VM (one-way; VM never re-pushes into the pager, avoiding echo loops).
     LaunchedEffect(weekPagerState) {
         snapshotFlow { weekPagerState.currentPage }
             .collect { page -> viewModel.syncWeekOffset(page - WEEK_BASE) }
     }
 
-    // Re-entry → snap back to today (Daily chip) and this week (Weekly pager).
-    LaunchedEffect(resetTrigger) {
-        dailyDayIndex = todayIndex
-        weekPagerState.animateScrollToPage(WEEK_BASE)
+    // Re-entry → snap back to today (Daily page) and this week (Weekly page).
+    LaunchedEffect(resetTrigger, viewMode) {
+        when (viewMode) {
+            TimetableViewMode.DAILY -> dayPagerState.animateScrollToPage(DAY_BASE)
+            TimetableViewMode.WEEKLY -> weekPagerState.animateScrollToPage(WEEK_BASE)
+        }
     }
 
-    // Back returns to today in Daily (Sprint 7B behaviour) and to this week in Weekly.
-    BackHandler(enabled = viewMode == TimetableViewMode.DAILY && dailyDayIndex != todayIndex) {
+    // Back returns to today in Daily and to this week in Weekly (Sprint 7B behaviour).
+    BackHandler(enabled = viewMode == TimetableViewMode.DAILY && dailyPage != DAY_BASE) {
         viewModel.requestReset()
     }
     BackHandler(enabled = viewMode == TimetableViewMode.WEEKLY && weekOffset != 0) {
@@ -148,26 +169,27 @@ fun TimetableScreen(
         { date, start, end -> addDialogPrefill = PlanPrefill(date, start, end) }
 
     // Default times for the FAB path: next full hour → +1h.
-    val fabDefaults = {
+    val fabDefaults: () -> PlanPrefill = {
         val nextHour = (java.time.LocalTime.now().hour + 1).coerceAtMost(21)
-        PlanPrefill(today, "${"$nextHour".padStart(2, '0')}:00", "${"$nextHour".padStart(2, '0')}:00")
+        PlanPrefill(today, nextHour.toString().padStart(2, '0') + ":00", nextHour.toString().padStart(2, '0') + ":00")
     }
+
+    // The date the Daily pager currently shows (subtitle + content use it).
+    val dailyDate = today.plusDays((dailyPage - DAY_BASE).toLong())
 
     // Subtitle follows the visible date (Daily) or week range (Weekly).
     val subtitle = if (viewMode == TimetableViewMode.WEEKLY) {
-        val weekStart = today.plusDays(weekOffset * 7L - todayIndex)
+        val weekStart = today.plusDays(weekOffset * 7L - (today.dayOfWeek.value - 1))
         val weekEnd = weekStart.plusDays(6)
         val dateFmt = DateTimeFormatter.ofPattern("d MMM", Locale.getDefault())
         "${weekStart.format(dateFmt)} – ${weekEnd.format(dateFmt)} ${weekEnd.year}"
     } else {
-        // Chips cover the current week, so the date is this week's Monday + dayIndex - todayIndex.
-        val chipDate = today.plusDays((dailyDayIndex - todayIndex).toLong())
-        chipDate.format(DateTimeFormatter.ofPattern("EEEE · d MMMM yyyy", Locale.getDefault()))
+        dailyDate.format(DateTimeFormatter.ofPattern("EEEE · d MMMM yyyy", Locale.getDefault()))
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // --- Immersive header: title + subtitle left, three-dot view menu right ---
+            // --- Immersive header: title + subtitle left, self-explanatory view pill right ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -186,9 +208,28 @@ fun TimetableScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                // Labelled view pill: shows the CURRENT view so users know what it switches.
                 Box {
-                    IconButton(onClick = { viewMenuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "View options")
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                            .clickable { viewMenuOpen = true }
+                            .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (viewMode == TimetableViewMode.DAILY) "Day view" else "Week view",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = "Switch timetable view",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                     DropdownMenu(expanded = viewMenuOpen, onDismissRequest = { viewMenuOpen = false }) {
                         DropdownMenuItem(
@@ -221,28 +262,6 @@ fun TimetableScreen(
                 }
             }
 
-            if (viewMode == TimetableViewMode.DAILY) {
-                // --- Sprint 8 Task 1: top date selector (chips for the current week) ---
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 22.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    (0..6).forEach { dayIndex ->
-                        val date = today.plusDays((dayIndex - todayIndex).toLong())
-                        DayChip(
-                            label = DAY_SHORTS[dayIndex],
-                            dateText = date.dayOfMonth.toString(),
-                            selected = dailyDayIndex == dayIndex,
-                            isToday = dayIndex == todayIndex,
-                            onClick = { dailyDayIndex = dayIndex }
-                        )
-                    }
-                }
-            }
-
             if (isStudent && clashWarnings.isNotEmpty()) {
                 ClashWarningBanner(
                     warnings = clashWarnings,
@@ -250,23 +269,53 @@ fun TimetableScreen(
                 )
             }
 
+            if (viewMode == TimetableViewMode.DAILY) {
+                // --- Chip rail: ~1 month of days around today (±15 days), tappable ---
+                val chipListState = rememberLazyListState(initialFirstVisibleItemIndex = CHIP_HALF_SPAN)
+                LazyRow(
+                    state = chipListState,
+                    contentPadding = PaddingValues(horizontal = 22.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                ) {
+                    items((-CHIP_HALF_SPAN..CHIP_HALF_SPAN).toList()) { offset ->
+                        val pageIndex = DAY_BASE + offset
+                        val date = today.plusDays(offset.toLong())
+                        DayChip(
+                            label = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                            dateText = date.dayOfMonth.toString(),
+                            selected = dailyPage == pageIndex,
+                            isToday = offset == 0,
+                            onClick = {
+                                scope.launch { dayPagerState.animateScrollToPage(pageIndex) }
+                            }
+                        )
+                    }
+                }
+            }
+
             val onClassClick = { session: ClassSession -> detailClass = session }
             val onPlanClick = { plan: PersonalPlan -> optionsPlan = plan }
 
             if (viewMode == TimetableViewMode.DAILY) {
-                // --- Single-day grid with glance free-bars ---
-                SingleDayGrid(
-                    modifier = Modifier.fillMaxSize(),
-                    scroll = gridScroll,
-                    dayIndex = dailyDayIndex,
-                    todayIndex = todayIndex,
-                    isStudent = isStudent,
-                    classes = weeklyTimetable.getOrNull(dailyDayIndex) ?: emptyList(),
-                    plans = if (isStudent) allPlans.filter { it.dayIndex == dailyDayIndex && isThisWeek(it.date) } else emptyList(),
-                    onClassClick = onClassClick,
-                    onPlanClick = onPlanClick,
-                    onAddSlot = openAddDialog
-                )
+                // --- Daily: full pager over days, same feel as Weekly ---
+                HorizontalPager(
+                    state = dayPagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    val pageDate = today.plusDays((page - DAY_BASE).toLong())
+                    SingleDayGrid(
+                        modifier = Modifier.fillMaxSize(),
+                        scroll = gridScroll,
+                        date = pageDate,
+                        isStudent = isStudent,
+                        classes = visibleTimetable.getOrNull(pageDate.dayOfWeek.value - 1) ?: emptyList(),
+                        plans = if (isStudent) allPlans.filter { it.date == pageDate } else emptyList(),
+                        onClassClick = onClassClick,
+                        onPlanClick = onPlanClick,
+                        onAddSlot = openAddDialog
+                    )
+                }
             } else {
                 // --- Weekly: horizontal pager over weeks (swipe left = previous week) ---
                 HorizontalPager(
@@ -278,9 +327,9 @@ fun TimetableScreen(
                         scroll = gridScroll,
                         weekOffset = page - WEEK_BASE,
                         isCurrentPage = weekPagerState.currentPage == page,
-                        todayIndex = todayIndex,
+                        todayIndex = today.dayOfWeek.value - 1,
                         isStudent = isStudent,
-                        classes = weeklyTimetable,
+                        classes = visibleTimetable,
                         plans = if (isStudent) allPlans else emptyList(),
                         onClassClick = onClassClick,
                         onPlanClick = onPlanClick,
@@ -298,6 +347,16 @@ fun TimetableScreen(
                     .padding(16.dp)
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Add plan")
+            }
+        } else if (canManageClasses && onOpenClassManagement != null) {
+            // Sprint 8: lecturers manage their own timetable straight from here.
+            FloatingActionButton(
+                onClick = { onOpenClassManagement() },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Manage own classes")
             }
         }
     }
@@ -364,13 +423,6 @@ fun TimetableScreen(
     detailClass?.let { session ->
         ClassDetailPopup(session = session, onDismiss = { detailClass = null })
     }
-}
-
-// True when the plan date sits in the week currently anchored to "today" (Daily chips week).
-private fun isThisWeek(planDate: LocalDate): Boolean {
-    val today = LocalDate.now()
-    val weekStart = today.minusDays(((today.dayOfWeek.value) - 1).toLong())
-    return !planDate.isBefore(weekStart) && planDate.isBefore(weekStart.plusDays(7))
 }
 
 @Composable
@@ -528,12 +580,16 @@ private fun AddPlanDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("From", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.width(12.dp))
-                    OutlinedButtonLocal(label = formatAmPm(start)) { chooseTimeFor = "start" }
+                    Button(onClick = { chooseTimeFor = "start" }) {
+                        Text(formatAmPm(start))
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("To", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.width(12.dp))
-                    OutlinedButtonLocal(label = formatAmPm(end)) { chooseTimeFor = "end" }
+                    Button(onClick = { chooseTimeFor = "end" }) {
+                        Text(formatAmPm(end))
+                    }
                 }
                 OutlinedTextField(
                     value = venue,
@@ -591,14 +647,6 @@ private fun AddPlanDialog(
     }
 }
 
-// Local thin wrapper so the button reads like the wireframe (time-value chip).
-@Composable
-private fun OutlinedButtonLocal(label: String, onClick: () -> Unit) {
-    Button(onClick = onClick) {
-        Text(label)
-    }
-}
-
 // "Choose Time" dialog: Material 3 TimePicker (AM/PM wheel per wireframe).
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -610,8 +658,8 @@ private fun ChooseTimeDialog(
     val initialHour = initialTime.substringBefore(':').toIntOrNull() ?: 9
     val initialMinute = initialTime.substringAfter(':').toIntOrNull() ?: 0
     val state = rememberTimePickerState(
-        initialHour = initialHour,
-        initialMinute = initialMinute,
+        initialHour = initialHour.coerceIn(0, 23),
+        initialMinute = initialMinute.coerceIn(0, 59),
         is24Hour = false
     )
     AlertDialog(
@@ -713,8 +761,4 @@ private fun formatAmPm(hhmm: String): String {
     val m = hhmm.substringAfter(':').toIntOrNull() ?: 0
     val h12 = if (h % 12 == 0) 12 else h % 12
     return "$h12:${m.toString().padStart(2, '0')}${if (h < 12) "am" else "pm"}"
-}
-
-private fun getCurrentDayIndex(): Int {
-    return java.time.LocalDate.now().dayOfWeek.value - 1
 }

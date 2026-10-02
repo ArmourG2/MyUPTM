@@ -36,7 +36,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavController
 import com.myuptm.data.repository.FirestoreClassRepository
-import com.myuptm.data.repository.MockPostsRepository
 import com.myuptm.domain.model.SupportLinks
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.AnnouncementRow
@@ -53,7 +52,7 @@ fun HomeScreen(navController: NavController) {
         factory = viewModelFactory {
             initializer {
                 // Sprint 7B: classes come from Firestore (global); posts remain mock.
-                HomeViewModel(FirestoreClassRepository(), MockPostsRepository())
+                HomeViewModel(FirestoreClassRepository(), com.myuptm.data.repository.FirestorePostsRepository())
             }
         }
     )

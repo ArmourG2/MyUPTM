@@ -35,14 +35,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavController
 import com.myuptm.data.repository.FirestoreProfileRepository
+import com.myuptm.data.repository.RealCloudinaryRepository
 import com.myuptm.domain.model.UserRole
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.viewmodel.ProfileViewModel
@@ -51,7 +56,14 @@ import com.myuptm.viewmodel.ProfileViewModel
 fun ProfileScreen(navController: NavController) {
     val profileViewModel: ProfileViewModel = viewModel(
         factory = viewModelFactory {
-            initializer { ProfileViewModel(FirestoreProfileRepository()) }
+            initializer {
+                // Sprint 8 Task 3: real Cloudinary upload replaces the mock seam.
+                val app = this[ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY]
+                ProfileViewModel(
+                    profileRepository = FirestoreProfileRepository(),
+                    cloudinaryRepository = RealCloudinaryRepository(app as android.content.Context)
+                )
+            }
         }
     )
     val uiState by profileViewModel.uiState.collectAsState()
@@ -99,12 +111,23 @@ fun ProfileScreen(navController: NavController) {
                 Box(
                     modifier = Modifier
                         .size(120.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
                         .clickable { imagePickerLauncher.launch("image/*") }, // Opens system image picker
                     contentAlignment = Alignment.Center
                 ) {
                     if (uiState.isUploading) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary)
+                    } else if (!profile.avatarUrl.isNullOrBlank()) {
+                        // Sprint 8 Task 3: real avatar image (Coil) replaces initials.
+                        coil3.compose.AsyncImage(
+                            model = coil3.request.ImageRequest.Builder(LocalContext.current)
+                                .data(profile.avatarUrl)
+                                .build(),
+                            contentDescription = "Profile picture",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
                     } else {
                         Text(
                             text = profile.initials,
@@ -113,10 +136,6 @@ fun ProfileScreen(navController: NavController) {
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
-                }
-                // This show da text(MOCK) TODO
-                uiState.uploadedImageUrl?.let { url ->
-                    Text("Avatar URL: $url", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                 }
                 uiState.uploadError?.let { err ->
                     Text("Error: $err", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))

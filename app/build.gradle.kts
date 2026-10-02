@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -21,6 +23,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Sprint 8 Task 3: Cloudinary config is injected from local.properties so the
+        // upload preset name is never committed into version control.
+        val cloudinaryProps = Properties().apply {
+            rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+        }
+        buildConfigField("String", "CLOUDINARY_CLOUD_NAME", "\"${cloudinaryProps.getProperty("cloudinaryCloudName") ?: ""}\"")
+        buildConfigField("String", "CLOUDINARY_UPLOAD_PRESET", "\"${cloudinaryProps.getProperty("cloudinaryUploadPreset") ?: ""}\"")
     }
 
     buildTypes {
@@ -57,6 +67,12 @@ dependencies {
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.datastore.preferences)
+
+    // OkHttp — multipart upload client for the real Cloudinary seam (Sprint 8 Task 3)
+    implementation(libs.okhttp)
+    // Coil 3 — async image loading (avatars in Profile)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     // Import the Firebase BoM (Bill of Materials)
     implementation(platform(libs.firebase.bom))

@@ -3,8 +3,8 @@ package com.myuptm.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.myuptm.data.repository.MockCloudinaryRepository
 import com.myuptm.domain.model.UserProfile
+import com.myuptm.domain.repository.CloudinaryRepository
 import com.myuptm.domain.repository.FileType
 import com.myuptm.domain.repository.ProfileRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +23,7 @@ data class ProfileUiState(
 
 class ProfileViewModel(
     private val profileRepository: ProfileRepository,
-    private val cloudinaryRepository: MockCloudinaryRepository = MockCloudinaryRepository()
+    private val cloudinaryRepository: CloudinaryRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
@@ -53,7 +53,17 @@ class ProfileViewModel(
             _uiState.value = _uiState.value.copy(isUploading = true, uploadError = null, uploadedImageUrl = null)
             val result = cloudinaryRepository.uploadFile(uri, FileType.IMAGE)
             result.onSuccess { url ->
-                _uiState.value = _uiState.value.copy(isUploading = false, uploadedImageUrl = url)
+                // Sprint 8 Task 3: persist the URL, then refresh so the avatar renders.
+                val saveResult = profileRepository.updateAvatarUrl(url)
+                if (saveResult.isSuccess) {
+                    _uiState.value = _uiState.value.copy(isUploading = false, uploadedImageUrl = url, uploadError = null)
+                    loadProfile()
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isUploading = false,
+                        uploadError = "Image uploaded but not saved: ${saveResult.exceptionOrNull()?.message}"
+                    )
+                }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(isUploading = false, uploadError = e.message)
             }

@@ -45,7 +45,9 @@ fun MyUptmApp() {
     val userRole by authViewModel.userRole.collectAsState()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = currentRoute != null && currentRoute != MyUptmRoutes.SIGN_IN
+    // Sprint 8: keep the bar during transitions — route is briefly null while switching,
+    // which previously made the bottom nav blink/disappear. SIGN_IN still hides it.
+    val showBottomBar = userRole != null && (currentRoute == null || currentRoute != MyUptmRoutes.SIGN_IN)
 
 
     Scaffold(

@@ -35,6 +35,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,14 +43,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.myuptm.data.repository.MockCloudinaryRepository
-import com.myuptm.domain.repository.FileType
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.myuptm.domain.model.LetterStatus
 import com.myuptm.ui.components.QrViewfinder
+import com.myuptm.viewmodel.AttendanceViewModel
 import kotlinx.coroutines.launch
 
 @Composable
@@ -59,20 +62,19 @@ fun AttendanceScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var isUploadingPdf by remember { mutableStateOf(false) }
-    var pdfResultMessage by remember { mutableStateOf<String?>(null) }
+    // Sprint 8 Task 4 (part 2): absence letters now create a real Firestore record.
+    val attendanceViewModel: AttendanceViewModel = viewModel()
+    val attendanceState by attendanceViewModel.uiState.collectAsState()
 
     val pdfPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let {
-            scope.launch {
-                isUploadingPdf = true
-                pdfResultMessage = null
-                val result = MockCloudinaryRepository().uploadFile(it, FileType.PDF)
-                isUploadingPdf = false
-                pdfResultMessage = result.getOrNull()?.let { url -> "Uploaded: $url" } ?: "Upload failed"
-            }
+        uri?.let { attendanceViewModel.submitAbsenceLetter(it, className = null) }
+    }
+
+    LaunchedEffect(attendanceState.submitSuccess) {
+        if (attendanceState.submitSuccess) {
+            snackbarHostState.showSnackbar("Absence letter submitted — pending lecturer review")
         }
     }
 
@@ -89,18 +91,40 @@ fun AttendanceScreen() {
 
             Button(
                 onClick = { pdfPickerLauncher.launch("application/pdf") },
-                enabled = !isUploadingPdf,
+                enabled = !attendanceState.isSubmitting,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                if (isUploadingPdf) {
+                if (attendanceState.isSubmitting) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (isUploadingPdf) "Uploading Absence Letter..." else "Upload Absence Letter (PDF)")
+                Text(if (attendanceState.isSubmitting) "Uploading Absence Letter..." else "Upload Absence Letter (PDF)")
             }
 
-            pdfResultMessage?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+            attendanceState.submitError?.let { err ->
+                Text(
+                    "Error: $err",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            // Sprint 8: the student sees the review status of their letters.
+            if (attendanceState.myLetters.isNotEmpty()) {
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    attendanceState.myLetters.take(3).forEach { letter ->
+                        Text(
+                            "Letter ${letter.status.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when (letter.status) {
+                                LetterStatus.APPROVED -> MaterialTheme.colorScheme.primary
+                                LetterStatus.DECLINED -> MaterialTheme.colorScheme.error
+                                LetterStatus.PENDING -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(16.dp))

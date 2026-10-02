@@ -8,6 +8,8 @@ activityCompose = "1.13.0"
 kotlin = "2.4.20"
 composeBom = "2026.02.01"
 navCompose = "2.10.2"
+okhttp = "5.5.0"
+coil = "3.6.3"
 lifecycle_version = "2.11.0"
 firebaseBom = "34.19.0"
 credentials = "1.6.0"
@@ -29,6 +31,9 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navCompose"}
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-core"}
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
+coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 androidx-lifecycle-viewmodel = {group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle_version"}
 androidx-datastore-preferences = {group = "androidx.datastore", name = "datastore-preferences", version = "1.2.1"}
 #FIREBASE

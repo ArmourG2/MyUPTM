@@ -11,6 +11,7 @@ import com.myuptm.domain.repository.PostsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDateTime
@@ -36,15 +37,18 @@ class HomeViewModel(
 
     init {
         // Sprint 7B: classes are global (Firestore) — stay live so the Next Class
-        // card reflects lecturer edits immediately.
+        // card reflects lecturer edits immediately. Posts feed is live too (Sprint 8).
         viewModelScope.launch {
-            classRepository.observeClasses().collect { classes ->
+            combine(
+                classRepository.observeClasses(),
+                postsRepository.observePosts()
+            ) { classes, posts -> classes to posts }.collect { (classes, posts) ->
                 val now = LocalDateTime.now()
                 val next = findNextClass(classes, now)
                 _uiState.value = HomeUiState(
                     nextClass = next?.first,
                     countdownLabel = buildCountdownLabel(next, now),
-                    announcements = postsRepository.getPosts().take(3),
+                    announcements = posts.take(3),
                     supportLinks = SupportLinks.ITEMS
                 )
             }

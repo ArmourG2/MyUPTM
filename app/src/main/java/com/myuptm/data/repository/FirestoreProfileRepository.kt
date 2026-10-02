@@ -42,6 +42,24 @@ class FirestoreProfileRepository(
         }
     }
 
+    // Sprint 8 Task 3: writes the uploaded avatar URL to users/{uid}.avatarUrl.
+    override suspend fun updateAvatarUrl(url: String): Result<Unit> {
+        val uid = auth.currentUser?.uid
+            ?: return Result.failure(Exception("User not logged in"))
+
+        return suspendCancellableCoroutine { continuation ->
+            db.collection("users")
+                .document(uid)
+                .update("avatarUrl", url)
+                .addOnSuccessListener {
+                    continuation.resume(Result.success(Unit))
+                }
+                .addOnFailureListener { e ->
+                    continuation.resume(Result.failure(e))
+                }
+        }
+    }
+
     // Maps a Firestore document into the UserProfile domain model.
     private fun DocumentSnapshot.toUserProfile(uid: String): UserProfile? {
         val roleStr = getString("role") ?: return null

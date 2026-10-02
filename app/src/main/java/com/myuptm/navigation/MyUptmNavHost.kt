@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -23,6 +24,7 @@ import androidx.navigation.navArgument
 import com.myuptm.navigation.MyUptmRoutes.HOME
 import com.myuptm.navigation.MyUptmRoutes.SIGN_IN
 import com.myuptm.domain.model.toPermissions
+import com.myuptm.ui.screens.AddPostScreen
 import com.myuptm.ui.screens.AttendanceScreen
 import com.myuptm.ui.screens.ClassManagementScreen
 import com.myuptm.ui.screens.HomeScreen
@@ -35,6 +37,8 @@ import com.myuptm.ui.screens.SignInScreen
 import com.myuptm.ui.screens.TimetableScreen
 import com.myuptm.viewmodel.AuthState
 import com.myuptm.viewmodel.AuthViewModel
+import com.myuptm.viewmodel.PostsViewModel
+import androidx.compose.ui.platform.LocalContext
 
 
 /**
@@ -86,7 +90,10 @@ fun MyUptmNavHost(
         composable(MyUptmRoutes.TIMETABLE) {
             val record = userRecord
             if (record != null) {
-                TimetableScreen(user = record)
+                TimetableScreen(
+                    user = record,
+                    onOpenClassManagement = { navController.navigate(MyUptmRoutes.CLASS_MANAGEMENT) }
+                )
             } else {
                 LoadingBox()
             }
@@ -143,6 +150,30 @@ fun MyUptmNavHost(
                     }
                 }
             )
+        }
+
+        composable(MyUptmRoutes.ADD_POST) {
+            // Sprint 8 Task 4: authoring entry gated to Admin + Lecturer-with-Admin.
+            val record = userRecord
+            when {
+                record == null -> LoadingBox()
+                record.toPermissions().canAddPost -> {
+                    val postsViewModel: PostsViewModel = viewModel(
+                        viewModelStoreOwner = LocalContext.current as ViewModelStoreOwner
+                    )
+                    AddPostScreen(
+                        authorEmail = record.email,
+                        onBackClick = { navController.popBackStack() },
+                        viewModel = postsViewModel
+                    )
+                }
+                else -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("You can't add posts", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
 
         composable(

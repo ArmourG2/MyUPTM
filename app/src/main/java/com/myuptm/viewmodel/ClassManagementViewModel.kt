@@ -5,9 +5,16 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.myuptm.data.repository.FirestoreClassRepository
 import com.myuptm.data.repository.FirestoreNotificationsRepository
+import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
+import com.myuptm.data.repository.MockAttendanceRoster
+import com.myuptm.data.repository.RosterStudent
+import com.myuptm.domain.model.AbsenceLetter
+import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
+import com.myuptm.domain.model.LetterStatus
 import com.myuptm.domain.model.NotificationType
 import com.myuptm.domain.model.TeachingMedium
+import com.myuptm.domain.repository.AbsenceLetterRepository
 import com.myuptm.domain.repository.ClassRepository
 import com.myuptm.domain.repository.NotificationsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,10 +29,15 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
 
     private val classRepository: ClassRepository = FirestoreClassRepository()
     private val notificationsRepository: NotificationsRepository = FirestoreNotificationsRepository()
+    private val lettersRepository: AbsenceLetterRepository = FirestoreAbsenceLetterRepository()
 
     // Global classes grouped by day (index 0 = Monday).
     private val _weeklyClasses = MutableStateFlow<List<List<ClassSession>>>(emptyList())
     val weeklyClasses: StateFlow<List<List<ClassSession>>> = _weeklyClasses.asStateFlow()
+
+    // Live absence-letter feed (Sprint 8 Task 4 part 2) for the review flow.
+    private val _letters = MutableStateFlow<List<AbsenceLetter>>(emptyList())
+    val letters: StateFlow<List<AbsenceLetter>> = _letters.asStateFlow()
 
     // One-line operation feedback ("Class added" / validation / failure reason).
     private val _status = MutableStateFlow<String?>(null)
@@ -36,6 +48,49 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
             classRepository.observeClasses().collect { classes ->
                 _weeklyClasses.value = List(7) { day -> classes.filter { it.dayIndex == day } }
             }
+        }
+        viewModelScope.launch {
+            lettersRepository.observeLetters().collect { letters ->
+                _letters.value = letters
+            }
+        }
+    }
+
+    // POC mock roster (documented seam): deterministic students per class.
+    fun rosterFor(classSession: ClassSession): List<RosterStudent> =
+        MockAttendanceRoster.studentsFor(classSession.id)
+
+    // APPROVE: letter status → APPROVED + notify the student (announcement channel).
+    fun approveLetter(letter: AbsenceLetter) {
+        viewModelScope.launch {
+            lettersRepository.setLetterStatus(letter.id, LetterStatus.APPROVED, null)
+                .onSuccess {
+                    _status.value = "Letter approved"
+                    notificationsRepository.sendNotification(
+                        NotificationType.ANNOUNCEMENT,
+                        "Absence letter approved",
+                        "Your absence letter (${letter.fileName}) was approved.",
+                        "Class Management"
+                    )
+                }
+                .onFailure { _status.value = it.message ?: "Could not approve letter" }
+        }
+    }
+
+    // DECLINE: letter status → DECLINED with a reason + notify the student.
+    fun declineLetter(letter: AbsenceLetter, reason: String) {
+        viewModelScope.launch {
+            lettersRepository.setLetterStatus(letter.id, LetterStatus.DECLINED, reason)
+                .onSuccess {
+                    _status.value = "Letter declined"
+                    notificationsRepository.sendNotification(
+                        NotificationType.ANNOUNCEMENT,
+                        "Absence letter declined",
+                        "Your absence letter (${letter.fileName}) was declined. Reason: $reason",
+                        "Class Management"
+                    )
+                }
+                .onFailure { _status.value = it.message ?: "Could not decline letter" }
         }
     }
 
@@ -54,7 +109,9 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         dayIndex: Int,
         startTime: String,
         endTime: String,
-        medium: TeachingMedium
+        medium: TeachingMedium,
+        section: String,
+        level: ClassLevel
     ) {
         if (!validate(subjectName, startTime, endTime)) return
         viewModelScope.launch {
@@ -66,7 +123,9 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                 venue = venue.trim(),
                 teachingMedium = medium,
                 startTime = startTime,
-                endTime = endTime
+                endTime = endTime,
+                section = section.trim(),
+                level = level
             )
             classRepository.addClass(session)
                 .onSuccess {
@@ -89,7 +148,9 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         dayIndex: Int,
         startTime: String,
         endTime: String,
-        medium: TeachingMedium
+        medium: TeachingMedium,
+        section: String,
+        level: ClassLevel
     ) {
         if (!validate(subjectName, startTime, endTime)) return
         viewModelScope.launch {
@@ -100,7 +161,9 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                 dayIndex = dayIndex,
                 startTime = startTime,
                 endTime = endTime,
-                teachingMedium = medium
+                teachingMedium = medium,
+                section = section.trim(),
+                level = level
             )
             classRepository.updateClass(updated)
                 .onSuccess {

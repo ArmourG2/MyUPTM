@@ -70,7 +70,7 @@ fun PostsScreen(
 
         if (canAddPost) {
             FloatingActionButton(
-                onClick = { /* TODO: Navigate to Add Post screen */ },
+                onClick = { navController.navigate(MyUptmRoutes.ADD_POST) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)

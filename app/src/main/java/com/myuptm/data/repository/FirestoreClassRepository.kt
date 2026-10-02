@@ -5,6 +5,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.android.gms.tasks.Task
+import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
 import com.myuptm.domain.model.TeachingMedium
 import com.myuptm.domain.repository.ClassRepository
@@ -83,14 +84,23 @@ class FirestoreClassRepository(
     }
 
     // Idempotent demo seed with fixed document ids ("1"…"10"); unowned so any
-    // lecturer may edit/adopt them during the POC.
+    // lecturer may edit/adopt them during the POC. Sprint 8: seeds carry varied
+    // sections + levels so the Class Management filters demo meaningfully.
     @Suppress("DEPRECATION")
     private fun seedDemoClasses() {
         val demo = MockTimetableRepository().getWeeklyTimetable()
-        demo.forEach { session ->
+        demo.forEachIndexed { index, session ->
+            val enriched = session.copy(
+                section = "Section ${(index % 3) + 1}",
+                level = when (index % 3) {
+                    1 -> ClassLevel.DEGREE
+                    2 -> ClassLevel.MASTER
+                    else -> ClassLevel.DIPLOMA
+                }
+            )
             db.collection(COLLECTION)
-                .document(session.id)
-                .set(session.toFirestoreMap(ownerEmail = null))
+                .document(enriched.id)
+                .set(enriched.toFirestoreMap(ownerEmail = null))
         }
     }
 
@@ -102,6 +112,8 @@ class FirestoreClassRepository(
         "dayIndex" to dayIndex,
         "startTime" to startTime,
         "endTime" to endTime,
+        "section" to section,
+        "level" to level.name,
         "ownerEmail" to ownerEmail,
         "updatedAt" to System.currentTimeMillis()
     )
@@ -119,6 +131,10 @@ class FirestoreClassRepository(
                 ?: TeachingMedium.OFFLINE,
             startTime = getString("startTime") ?: "00:00",
             endTime = getString("endTime") ?: "00:00",
+            section = getString("section") ?: "",
+            level = getString("level")
+                ?.let { lvl -> runCatching { ClassLevel.valueOf(lvl) }.getOrNull() }
+                ?: ClassLevel.DIPLOMA,
             ownerEmail = getString("ownerEmail"),
             updatedAt = getLong("updatedAt")
         )

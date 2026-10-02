@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.myuptm.domain.model.Post
@@ -67,8 +70,23 @@ fun PostDetailScreen(
                             Icon(Icons.Filled.Delete, contentDescription = "Remove post")
                         }
                     }
-                    IconButton(onClick = { TODO() }) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share")
+                    // Sprint 8: share via system intent (TODO() crashed the app on tap).
+                    post?.let { currentPost ->
+                        val context = LocalContext.current
+                        IconButton(onClick = {
+                            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(
+                                    android.content.Intent.EXTRA_TEXT,
+                                    "${currentPost.title}\n\n${currentPost.snippet}${currentPost.imageUrl?.let { "\n$it" } ?: ""}"
+                                )
+                            }
+                            context.startActivity(
+                                android.content.Intent.createChooser(shareIntent, "Share post")
+                            )
+                        }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share")
+                        }
                     }
                 }
             )
@@ -93,15 +111,29 @@ fun PostDetailScreen(
             ) {
                 AssistChip(onClick = {}, label = { Text(post.facultyTag) })
 
-                // IMAGE placeholder (real image in Sprint 4 via B-009)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("IMAGE", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Sprint 8 Task 4: the real post image replaces the placeholder.
+                if (post.imageUrl != null) {
+                    coil3.compose.AsyncImage(
+                        model = coil3.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                            .data(post.imageUrl)
+                            .build(),
+                        contentDescription = "Post image",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("No image", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 Text(post.title, style = MaterialTheme.typography.headlineSmall)

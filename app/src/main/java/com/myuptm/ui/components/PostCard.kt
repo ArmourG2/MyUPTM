@@ -34,6 +34,17 @@ fun PostCard(post: Post, onClick: () -> Unit) {
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // Sprint 8 Task 4: real post image when present.
+            post.imageUrl?.let { url ->
+                val context = androidx.compose.ui.platform.LocalContext.current
+                coil3.compose.AsyncImage(
+                    model = coil3.request.ImageRequest.Builder(context).data(url).build(),
+                    contentDescription = "Post image",
+                    modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+                Spacer(Modifier.height(10.dp))
+            }
             Text(
                 post.title,
                 style = MaterialTheme.typography.titleMedium,
