@@ -35,6 +35,14 @@ class NotificationsViewModel(application: Application) : AndroidViewModel(applic
     private val _notifications = MutableStateFlow<List<AppNotification>>(emptyList())
     val notifications: StateFlow<List<AppNotification>> = _notifications.asStateFlow()
 
+    // Sprint 8 Task 5: inbox visibility — students see global + ONLY their targeted
+    // warnings; staff sees everything. myMatric comes from the profile fetch.
+    private var myMatric: String? = null
+    private var isStudentRole = false
+
+    private val profileRepository: com.myuptm.domain.repository.ProfileRepository =
+        com.myuptm.data.repository.FirestoreProfileRepository()
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private val warningsFlow = _boundUser.flatMapLatest { user ->
         val repo = planRepository
@@ -60,23 +68,39 @@ class NotificationsViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             notificationsRepository.observeNotifications().collect { list ->
                 if (baselineSeen) {
-                    list.filter { it.id !in seenIds && it.type != NotificationType.CLASH_WARNING }
+                    visibleToMe(list).filter { it.id !in seenIds && it.type != NotificationType.CLASH_WARNING }
                         .forEach { notification ->
                             NotificationHelper.show(getApplication(), notification.title, notification.message)
                         }
                 }
                 baselineSeen = true
                 seenIds.addAll(list.map { it.id })
-                _notifications.value = list
+                _notifications.value = visibleToMe(list)
             }
         }
     }
 
+    // Inbox filter: student role → targeted docs must match my matric (or be global).
+    private fun visibleToMe(list: List<AppNotification>): List<AppNotification> =
+        if (!isStudentRole) list else list.filter {
+            it.targetMatric == null || it.targetMatric.equals(myMatric, ignoreCase = true)
+        }
+
     // Re-binds to the current signed-in user (activity-scoped VM safety).
     fun bindUser(user: AppUser?) {
         if (_boundUser.value?.email == user?.email) return
+        isStudentRole = user?.role == com.myuptm.domain.model.UserRole.STUDENT
         planRepository = user?.let { DataStorePersonalPlanRepository(getApplication(), it.email) }
         _boundUser.value = user
+        if (isStudentRole) {
+            // Students resolve their matric once to receive targeted warnings.
+            viewModelScope.launch {
+                myMatric = profileRepository.getUserProfile().getOrNull()
+                    ?.studentId ?: user?.email
+                _notifications.value = visibleToMe(_notifications.value)
+                baselineSeen = false
+            }
+        }
     }
 
     fun sendNotification(title: String, message: String) {

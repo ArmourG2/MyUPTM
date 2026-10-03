@@ -8,6 +8,7 @@ import com.myuptm.data.repository.FirestoreNotificationsRepository
 import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
 import com.myuptm.data.repository.MockAttendanceRoster
 import com.myuptm.data.repository.RosterStudent
+import com.myuptm.data.repository.RealCloudinaryRepository
 import com.myuptm.domain.model.AbsenceLetter
 import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
@@ -16,6 +17,7 @@ import com.myuptm.domain.model.NotificationType
 import com.myuptm.domain.model.TeachingMedium
 import com.myuptm.domain.repository.AbsenceLetterRepository
 import com.myuptm.domain.repository.ClassRepository
+import com.myuptm.domain.repository.FileType
 import com.myuptm.domain.repository.NotificationsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +32,7 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     private val classRepository: ClassRepository = FirestoreClassRepository()
     private val notificationsRepository: NotificationsRepository = FirestoreNotificationsRepository()
     private val lettersRepository: AbsenceLetterRepository = FirestoreAbsenceLetterRepository()
+    private val cloudinaryRepository = RealCloudinaryRepository(application)
 
     // Global classes grouped by day (index 0 = Monday).
     private val _weeklyClasses = MutableStateFlow<List<List<ClassSession>>>(emptyList())
@@ -42,6 +45,10 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     // One-line operation feedback ("Class added" / validation / failure reason).
     private val _status = MutableStateFlow<String?>(null)
     val status: StateFlow<String?> = _status.asStateFlow()
+
+    // Sprint 8 Task 5: warning-letter sending state (upload + Firestore write can take seconds).
+    private val _warningBusy = MutableStateFlow(false)
+    val warningBusy: StateFlow<Boolean> = _warningBusy.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -91,6 +98,57 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                     )
                 }
                 .onFailure { _status.value = it.message ?: "Could not decline letter" }
+        }
+    }
+
+    // Sprint 8 Task 5: WARNING LETTERS. Red-only rule (missed >= 5) is enforced by the
+    // UI (buttons disabled otherwise); targeted to ONE student or a batch in one class.
+    // Delivered as ANNOUNCEMENT docs stamped with the student's matric; students see
+    // only global + their own warnings in the Home bell inbox.
+    fun canWarn(student: RosterStudent): Boolean = student.missed >= 5
+
+    fun redStudents(students: List<RosterStudent>): Int = students.count { canWarn(it) }
+
+    fun sendWarning(
+        students: List<RosterStudent>,
+        classSession: ClassSession,
+        title: String,
+        description: String,
+        attachmentUri: android.net.Uri?
+    ) {
+        if (_warningBusy.value) return
+        _warningBusy.value = true
+        viewModelScope.launch {
+            runCatching {
+                val (url, name) = attachmentUri?.let { uri ->
+                    // Warning attachment = a document (PDF) via the Cloudinary raw seam.
+                    val uploaded = cloudinaryRepository.uploadFile(uri, FileType.PDF)
+                        .getOrElse { throw it }
+                    uploaded to uri.lastPathSegment.orEmpty().ifEmpty { "warning_attachment.pdf" }
+                } ?: null to null
+                students.forEach { student ->
+                    notificationsRepository.sendNotification(
+                        type = NotificationType.ANNOUNCEMENT,
+                        title = "Warning letter: $title",
+                        message = buildString {
+                            append(description)
+                            append("\n\nClass: ")
+                            append(classSession.subjectName)
+                            append(" (").append(classSession.section).append(")")
+                            if (name != null) append("\nAttachment available in this inbox.")
+                        },
+                        senderName = classSession.lecturerName,
+                        targetMatric = student.matric,
+                        attachmentUrl = url,
+                        attachmentName = name
+                    ).getOrThrow()
+                }
+            }.onSuccess {
+                _status.value = if (students.size == 1) "Warning sent" else "Warnings sent to ${students.size} students"
+            }.onFailure { e ->
+                _status.value = e.message ?: "Could not send warning"
+            }
+            _warningBusy.value = false
         }
     }
 

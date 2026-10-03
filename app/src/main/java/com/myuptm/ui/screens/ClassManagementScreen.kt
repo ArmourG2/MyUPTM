@@ -82,6 +82,9 @@ fun ClassManagementScreen(
     val weeklyClasses by viewModel.weeklyClasses.collectAsState()
     val letters by viewModel.letters.collectAsState()
     val status by viewModel.status.collectAsState()
+    val warningBusy by viewModel.warningBusy.collectAsState()
+
+    var warningTargets by remember { mutableStateOf<List<RosterStudent>?>(null) }
 
     var searchText by remember { mutableStateOf("") }
     var selectedLevel by remember { mutableStateOf<ClassLevel?>(null) } // null = All
@@ -145,12 +148,14 @@ fun ClassManagementScreen(
                     },
                     classSession = rosterClass!!,
                     onApprove = viewModel::approveLetter,
-                    onOpenDecline = { declineLetter = it }
+                    onOpenDecline = { declineLetter = it },
+                    onWarnStudent = { warningTargets = listOf(detailStudent!!) }
                 )
                 isRosterView -> StudentRosterView(
                     students = viewModel.rosterFor(rosterClass!!),
                     letters = letters,
-                    onStudentClick = { detailStudent = it }
+                    onStudentClick = { detailStudent = it },
+                    onWarnRed = { warningTargets = it }
                 )
                 else -> ClassListView(
                     weeklyClasses = weeklyClasses,
@@ -241,6 +246,19 @@ fun ClassManagementScreen(
             onSend = { reason ->
                 viewModel.declineLetter(letter, reason)
                 declineLetter = null
+            }
+        )
+    }
+
+    warningTargets?.let { targets ->
+        WarningComposerDialog(
+            targets = targets,
+            classSession = rosterClass!!,
+            isSending = warningBusy,
+            onDismiss = { if (!warningBusy) warningTargets = null },
+            onSend = { title, desc, attachment ->
+                viewModel.sendWarning(targets, rosterClass!!, title, desc, attachment)
+                if (viewModel.status.value != null) warningTargets = null
             }
         )
     }
@@ -415,13 +433,34 @@ private fun ClassManagementCard(
 private fun StudentRosterView(
     students: List<RosterStudent>,
     letters: List<AbsenceLetter>,
-    onStudentClick: (RosterStudent) -> Unit
+    onStudentClick: (RosterStudent) -> Unit,
+    onWarnRed: (List<RosterStudent>) -> Unit
 ) {
+    val redStudents = students.filter { it.missed >= 5 }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item(key = "warn_header") {
+            if (redStudents.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    // Sprint 8 Task 5: batch warning for ALL red students of this class.
+                    androidx.compose.material3.Button(
+                        onClick = { onWarnRed(redStudents) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = RedBadge)
+                    ) {
+                        Text(
+                            "Warn all red students (${redStudents.size})",
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
         items(students, key = { it.matric }) { student ->
             val pendingLetters = letters.count {
                 it.studentMatric.equals(student.matric, ignoreCase = true) && it.status == LetterStatus.PENDING
@@ -509,8 +548,10 @@ private fun StudentLetterReview(
     letters: List<AbsenceLetter>,
     classSession: ClassSession,
     onApprove: (AbsenceLetter) -> Unit,
-    onOpenDecline: (AbsenceLetter) -> Unit
+    onOpenDecline: (AbsenceLetter) -> Unit,
+    onWarnStudent: () -> Unit = {}
 ) {
+    val redOnly = student.missed >= 5
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -574,6 +615,17 @@ private fun StudentLetterReview(
                     letter = letter,
                     onApprove = { onApprove(letter) },
                     onDecline = { onOpenDecline(letter) }
+                )
+            }
+        }
+
+        // Sprint 8 Task 5: warning entry — RED students only (missed >= 5).
+        if (redOnly) {
+            TextButton(onClick = onWarnStudent, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Send warning letter",
+                    color = RedBadge,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -861,6 +913,102 @@ private fun ClassEditorDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+// Sprint 8 Task 5: warning composer — Title, Description, optional PDF attachment;
+// target list (single student or all red students of the class) decided by the entry.
+@Composable
+private fun WarningComposerDialog(
+    targets: List<RosterStudent>,
+    classSession: ClassSession,
+    isSending: Boolean,
+    onDismiss: () -> Unit,
+    onSend: (title: String, description: String, attachment: android.net.Uri?) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var attachment by remember { mutableStateOf<android.net.Uri?>(null) }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? -> attachment = uri }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(
+            if (targets.size == 1) "Warning letter"
+            else "Warning letter · ${targets.size} students"
+        ) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (targets.size == 1)
+                        "To: ${targets.first().name} (${targets.first().matric})"
+                    else
+                        "Batch warning to red students (missed 5+)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (attachment != null) {
+                    Text(
+                        "Attachment: ${attachment?.lastPathSegment}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                    )
+                }
+                TextButton(onClick = { picker.launch("application/pdf") }) {
+                    Text(if (attachment == null) "Attach PDF (optional)" else "Change attachment")
+                }
+                if (isSending) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Sending warning...", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                localError?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isSending && title.isNotBlank() && description.isNotBlank(),
+                onClick = {
+                    if (title.isBlank() || description.isBlank()) {
+                        localError = "Title and description are required"
+                        return@TextButton
+                    }
+                    onSend(title.trim(), description.trim(), attachment)
+                }
+            ) { Text("Send") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSending) { Text("Cancel") }
         }
     )
 }

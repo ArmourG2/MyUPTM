@@ -12,10 +12,15 @@ interface NotificationsRepository {
     fun observeNotifications(): Flow<List<AppNotification>>
 
     // Writes a new notification document that every device will pick up.
+    // Sprint 8 (Task 5): targetMatric delivers to one student only (null = everyone);
+    // attachment* link to a Cloudinary upload (warning letters).
     suspend fun sendNotification(
         type: NotificationType,
         title: String,
         message: String,
-        senderName: String
+        senderName: String,
+        targetMatric: String? = null,
+        attachmentUrl: String? = null,
+        attachmentName: String? = null
     ): Result<Unit>
 }

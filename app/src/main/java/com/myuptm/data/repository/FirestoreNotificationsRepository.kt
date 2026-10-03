@@ -41,7 +41,10 @@ class FirestoreNotificationsRepository(
         type: NotificationType,
         title: String,
         message: String,
-        senderName: String
+        senderName: String,
+        targetMatric: String?,
+        attachmentUrl: String?,
+        attachmentName: String?
     ): Result<Unit> {
         val task = db.collection(COLLECTION).add(
             mapOf(
@@ -49,7 +52,10 @@ class FirestoreNotificationsRepository(
                 "title" to title,
                 "message" to message,
                 "senderName" to senderName,
-                "createdAt" to FieldValue.serverTimestamp()
+                "createdAt" to FieldValue.serverTimestamp(),
+                "targetMatric" to targetMatric,
+                "attachmentUrl" to attachmentUrl,
+                "attachmentName" to attachmentName
             )
         )
         return task.awaitResult().map { }
@@ -65,7 +71,10 @@ class FirestoreNotificationsRepository(
             title = title,
             message = getString("message").orEmpty(),
             senderName = getString("senderName").orEmpty(),
-            createdAtEpochMs = getTimestamp("createdAt")?.toDate()?.time ?: 0L
+            createdAtEpochMs = getTimestamp("createdAt")?.toDate()?.time ?: 0L,
+            targetMatric = getString("targetMatric"),
+            attachmentUrl = getString("attachmentUrl"),
+            attachmentName = getString("attachmentName")
         )
     }
 

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -66,6 +68,8 @@ fun AttendanceScreen() {
     val attendanceViewModel: AttendanceViewModel = viewModel()
     val attendanceState by attendanceViewModel.uiState.collectAsState()
 
+    var showLetterConfirm by remember { mutableStateOf(false) }
+
     val pdfPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -90,7 +94,7 @@ fun AttendanceScreen() {
             Text("Attendance Verification", style = MaterialTheme.typography.headlineSmall)
 
             Button(
-                onClick = { pdfPickerLauncher.launch("application/pdf") },
+                onClick = { showLetterConfirm = true },
                 enabled = !attendanceState.isSubmitting,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -99,6 +103,24 @@ fun AttendanceScreen() {
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (attendanceState.isSubmitting) "Uploading Absence Letter..." else "Upload Absence Letter (PDF)")
+            }
+
+            // Sprint 8 Task 5 (point 3): NO-CANCEL policy made explicit BEFORE submitting.
+            if (showLetterConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showLetterConfirm = false },
+                    title = { Text("Submit absence letter?") },
+                    text = { Text("Once submitted the letter cannot be cancelled. The lecturer will review it and you will be notified of the decision. Continue?") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showLetterConfirm = false
+                            pdfPickerLauncher.launch("application/pdf")
+                        }) { Text("Continue") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showLetterConfirm = false }) { Text("Back") }
+                    }
+                )
             }
 
             attendanceState.submitError?.let { err ->
