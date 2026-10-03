@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.myuptm.data.notifications.NotificationHelper
 import com.myuptm.data.repository.DataStorePersonalPlanRepository
 import com.myuptm.data.repository.FirestoreNotificationsRepository
+import com.myuptm.data.repository.MockAttendanceRoster
+import com.myuptm.data.repository.matchesMatric
 import com.myuptm.domain.model.AppNotification
 import com.myuptm.domain.model.AppUser
 import com.myuptm.domain.model.NotificationType
@@ -81,9 +83,15 @@ class NotificationsViewModel(application: Application) : AndroidViewModel(applic
     }
 
     // Inbox filter: student role → targeted docs must match my matric (or be global).
+    // Sprint 9: matched via MatricMatcher (prefix/format tolerant), PLUS a POC alias
+    // — with exactly ONE real student account in the demo, warnings addressed to the
+    // demo roster matric (MockAttendanceRoster.DEMO_MATRIC) are always visible to the
+    // student, so a missing/incorrect profile studentId can never swallow the demo.
     private fun visibleToMe(list: List<AppNotification>): List<AppNotification> =
         if (!isStudentRole) list else list.filter {
-            it.targetMatric == null || it.targetMatric.equals(myMatric, ignoreCase = true)
+            it.targetMatric == null ||
+                it.targetMatric.matchesMatric(myMatric) ||
+                it.targetMatric.matchesMatric(MockAttendanceRoster.DEMO_MATRIC)
         }
 
     // Re-binds to the current signed-in user (activity-scoped VM safety).

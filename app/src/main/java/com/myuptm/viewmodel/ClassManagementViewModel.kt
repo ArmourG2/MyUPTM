@@ -3,12 +3,12 @@ package com.myuptm.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
 import com.myuptm.data.repository.FirestoreClassRepository
 import com.myuptm.data.repository.FirestoreNotificationsRepository
-import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
 import com.myuptm.data.repository.MockAttendanceRoster
-import com.myuptm.data.repository.RosterStudent
 import com.myuptm.data.repository.RealCloudinaryRepository
+import com.myuptm.data.repository.RosterStudent
 import com.myuptm.domain.model.AbsenceLetter
 import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
@@ -29,10 +29,15 @@ import kotlinx.coroutines.launch
 // Every successful change fires a CLASS_UPDATE notification so students stay in sync.
 class ClassManagementViewModel(application: Application) : AndroidViewModel(application) {
 
+    // Sprint 9: lecturer email for classes scoping — must be bound by the screen
+    // (activity-scoped VM safety, same pattern as TimetableViewModel.bindUser).
     private val classRepository: ClassRepository = FirestoreClassRepository()
     private val notificationsRepository: NotificationsRepository = FirestoreNotificationsRepository()
     private val lettersRepository: AbsenceLetterRepository = FirestoreAbsenceLetterRepository()
     private val cloudinaryRepository = RealCloudinaryRepository(application)
+
+    // The signed-in lecturer's email; drives "only MY classes" scoping.
+    private var ownerEmail: String? = null
 
     // Global classes grouped by day (index 0 = Monday).
     private val _weeklyClasses = MutableStateFlow<List<List<ClassSession>>>(emptyList())
@@ -53,7 +58,13 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     init {
         viewModelScope.launch {
             classRepository.observeClasses().collect { classes ->
-                _weeklyClasses.value = List(7) { day -> classes.filter { it.dayIndex == day } }
+                // Sprint 9: lecturer scope — ONLY classes they teach
+                // (ownerEmail == ownerEmail). Demo seeds (ownerEmail == null) are
+                // hidden from every lecturer; they own their own classes.
+                val scoped = ownerEmail?.let { email ->
+                    classes.filter { it.ownerEmail == email }
+                } ?: classes
+                _weeklyClasses.value = List(7) { day -> scoped.filter { it.dayIndex == day } }
             }
         }
         viewModelScope.launch {
@@ -63,9 +74,12 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    // POC mock roster (documented seam): deterministic students per class.
+    // Sprint 9 roster binding: sections carry REAL student names/matrics (owner-baked,
+    // display-only; only AM2412018161 has an account). Lookup is by the class's SECTION
+    // (Subject_XX grouping), so every section shows its own list — not the old
+    // classId-hash rotation of one name pool across all classes.
     fun rosterFor(classSession: ClassSession): List<RosterStudent> =
-        MockAttendanceRoster.studentsFor(classSession.id)
+        MockAttendanceRoster.studentsFor(classSession.section)
 
     // APPROVE: letter status → APPROVED + notify the student (announcement channel).
     fun approveLetter(letter: AbsenceLetter) {
@@ -125,7 +139,7 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                     val uploaded = cloudinaryRepository.uploadFile(uri, FileType.PDF)
                         .getOrElse { throw it }
                     uploaded to uri.lastPathSegment.orEmpty().ifEmpty { "warning_attachment.pdf" }
-                } ?: null to null
+                } ?: (null to null)
                 students.forEach { student ->
                     notificationsRepository.sendNotification(
                         type = NotificationType.ANNOUNCEMENT,
@@ -158,6 +172,11 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
 
     fun clearStatus() {
         _status.value = null
+    }
+
+    // Re-binds to the signed-in lecturer (activity-scoped VM safety).
+    fun bindOwner(email: String?) {
+        ownerEmail = email
     }
 
     fun addClass(

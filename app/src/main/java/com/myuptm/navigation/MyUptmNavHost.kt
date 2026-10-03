@@ -86,7 +86,7 @@ fun MyUptmNavHost(
                 isLoading = authState == AuthState.LOADING // Pass this to show a spinner
             )
         }
-        composable(HOME) { HomeScreen(navController = navController) }
+        composable(HOME) { HomeScreen(navController = navController, user = userRecord) }
         composable(MyUptmRoutes.TIMETABLE) {
             val record = userRecord
             if (record != null) {

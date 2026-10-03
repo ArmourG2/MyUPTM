@@ -29,7 +29,10 @@ data class HomeUiState(
 
 class HomeViewModel(
     private val classRepository: ClassRepository,
-    private val postsRepository: PostsRepository
+    private val postsRepository: PostsRepository,
+    // Sprint 9 (owner note 1): when set (signed-in lecturer), the Next Class card
+    // considers ONLY classes they teach — same scoping as the Timetable screen.
+    private val ownClassesOnlyEmail: String? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -43,8 +46,11 @@ class HomeViewModel(
                 classRepository.observeClasses(),
                 postsRepository.observePosts()
             ) { classes, posts -> classes to posts }.collect { (classes, posts) ->
+                val scoped = ownClassesOnlyEmail
+                    ?.let { email -> classes.filter { it.ownerEmail == email } }
+                    ?: classes
                 val now = LocalDateTime.now()
-                val next = findNextClass(classes, now)
+                val next = findNextClass(scoped, now)
                 _uiState.value = HomeUiState(
                     nextClass = next?.first,
                     countdownLabel = buildCountdownLabel(next, now),

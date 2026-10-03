@@ -194,6 +194,7 @@ private fun ClashWarningRow(warning: AppNotification) {
 
 @Composable
 private fun NotificationRow(notification: AppNotification) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -230,6 +231,26 @@ private fun NotificationRow(notification: AppNotification) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
+                // Sprint 9: warning letters ride in as PDFs — give them an opener.
+                if (notification.attachmentUrl != null) {
+                    TextButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(notification.attachmentUrl)
+                                    )
+                                )
+                            }
+                        }
+                    ) {
+                        Text(
+                            "Open attachment: ${notification.attachmentName ?: "document"}",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
         }
     }

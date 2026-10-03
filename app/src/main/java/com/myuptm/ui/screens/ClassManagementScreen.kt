@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +38,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,8 +55,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.myuptm.data.repository.MatricMatcher
 import com.myuptm.data.repository.RosterStudent
+import com.myuptm.data.repository.matchesMatric
 import com.myuptm.domain.model.AbsenceLetter
 import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
@@ -83,6 +90,9 @@ fun ClassManagementScreen(
     val letters by viewModel.letters.collectAsState()
     val status by viewModel.status.collectAsState()
     val warningBusy by viewModel.warningBusy.collectAsState()
+
+    // Sprint 9: bind scoping to the signed-in lecturer ("only MY classes").
+    LaunchedEffect(ownerEmail) { viewModel.bindOwner(ownerEmail) }
 
     var warningTargets by remember { mutableStateOf<List<RosterStudent>?>(null) }
 
@@ -144,7 +154,7 @@ fun ClassManagementScreen(
                 isStudentView -> StudentLetterReview(
                     student = detailStudent!!,
                     letters = letters.filter {
-                        it.studentMatric.equals(detailStudent!!.matric, ignoreCase = true)
+                        it.studentMatric.matchesMatric(detailStudent!!.matric)
                     },
                     classSession = rosterClass!!,
                     onApprove = viewModel::approveLetter,
@@ -461,9 +471,10 @@ private fun StudentRosterView(
                 }
             }
         }
-        items(students, key = { it.matric }) { student ->
+        itemsIndexed(students, key = { _, student -> student.name + student.matric }) { _, student ->
             val pendingLetters = letters.count {
-                it.studentMatric.equals(student.matric, ignoreCase = true) && it.status == LetterStatus.PENDING
+                it.studentMatric.matchesMatric(student.matric) &&
+                    it.status == LetterStatus.PENDING
             }
             RosterCard(
                 student = student,
@@ -774,116 +785,152 @@ private fun ClassEditorDialog(
     var subject by remember { mutableStateOf(initial?.subjectName ?: "") }
     var lecturer by remember { mutableStateOf(initial?.lecturerName ?: "") }
     var venue by remember { mutableStateOf(initial?.venue ?: "") }
-    var start by remember { mutableStateOf(initial?.startTime ?: "") }
-    var end by remember { mutableStateOf(initial?.endTime ?: "") }
+    var start by remember {
+        mutableStateOf(initial?.startTime ?: "09:00")
+    }
+    var end by remember {
+        mutableStateOf(initial?.endTime ?: "10:00")
+    }
     var dayIndex by remember { mutableStateOf(initial?.dayIndex ?: 0) }
     var medium by remember { mutableStateOf(initial?.teachingMedium ?: TeachingMedium.OFFLINE) }
     var section by remember { mutableStateOf(initial?.section ?: "") }
     var level by remember { mutableStateOf(initial?.level ?: ClassLevel.DIPLOMA) }
     var dayMenuOpen by remember { mutableStateOf(false) }
+    var chooseTimeFor by remember { mutableStateOf<String?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = subject,
-                    onValueChange = { subject = it },
-                    label = { Text("Subject name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+    // Sprint 9 revamp (wireframe): Dialog + Surface, two-column field rows,
+    // day + Online/Offline side by side, From/To open the shared M3 "Choose Time"
+    // picker (same UX as the student's plan dialog), Cancel/Save pinned bottom-right.
+    Dialog(onDismissRequest = onDismiss) {
+        androidx.compose.material3.Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
                 )
-                OutlinedTextField(
-                    value = section,
-                    onValueChange = { section = it },
-                    label = { Text("Section (e.g. Section 1)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                // Programme level chips (wireframe: Diploma / Degree / Master).
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                // Row 1: Subject Name | Section
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = subject,
+                        onValueChange = { subject = it },
+                        label = { Text("Subject Name") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.4f)
+                    )
+                    OutlinedTextField(
+                        value = section,
+                        onValueChange = { section = it },
+                        label = { Text("Section") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Row 2: programme level chips (Diploma / Degree / Master).
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     FilterChip(
                         selected = level == ClassLevel.DIPLOMA,
                         onClick = { level = ClassLevel.DIPLOMA },
-                        label = { Text("Diploma") }
+                        label = { Text("Diploma") },
+                        modifier = Modifier.weight(1f)
                     )
                     FilterChip(
                         selected = level == ClassLevel.DEGREE,
                         onClick = { level = ClassLevel.DEGREE },
-                        label = { Text("Degree") }
+                        label = { Text("Degree") },
+                        modifier = Modifier.weight(1f)
                     )
                     FilterChip(
                         selected = level == ClassLevel.MASTER,
                         onClick = { level = ClassLevel.MASTER },
-                        label = { Text("Master") }
+                        label = { Text("Master") },
+                        modifier = Modifier.weight(1f)
                     )
                 }
-                OutlinedTextField(
-                    value = lecturer,
-                    onValueChange = { lecturer = it },
-                    label = { Text("Lecturer name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = venue,
-                    onValueChange = { venue = it },
-                    label = { Text("Venue") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Box {
-                    OutlinedButton(
-                        onClick = { dayMenuOpen = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(DAY_NAMES[dayIndex.coerceIn(0, 6)])
-                    }
-                    DropdownMenu(
-                        expanded = dayMenuOpen,
-                        onDismissRequest = { dayMenuOpen = false }
-                    ) {
-                        DAY_NAMES.forEachIndexed { index, day ->
-                            DropdownMenuItem(
-                                text = { Text(day) },
-                                onClick = {
-                                    dayIndex = index
-                                    dayMenuOpen = false
-                                }
-                            )
+
+                // Row 3: Lecturer Name | Venue
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = lecturer,
+                        onValueChange = { lecturer = it },
+                        label = { Text("Lecturer Name") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = venue,
+                        onValueChange = { venue = it },
+                        label = { Text("Venue") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Row 4: day dropdown | Online/Offline segmented toggle.
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { dayMenuOpen = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(DAY_NAMES[dayIndex.coerceIn(0, 6)])
+                        }
+                        DropdownMenu(
+                            expanded = dayMenuOpen,
+                            onDismissRequest = { dayMenuOpen = false }
+                        ) {
+                            DAY_NAMES.forEachIndexed { index, day ->
+                                DropdownMenuItem(
+                                    text = { Text(day) },
+                                    onClick = {
+                                        dayIndex = index
+                                        dayMenuOpen = false
+                                    }
+                                )
+                            }
                         }
                     }
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                        SegmentedButton(
+                            selected = medium == TeachingMedium.ONLINE,
+                            onClick = { medium = TeachingMedium.ONLINE },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                        ) { Text("Online") }
+                        SegmentedButton(
+                            selected = medium == TeachingMedium.OFFLINE,
+                            onClick = { medium = TeachingMedium.OFFLINE },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                        ) { Text("Offline") }
+                    }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = start,
-                        onValueChange = { start = it },
-                        label = { Text("Start (HH:mm)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = end,
-                        onValueChange = { end = it },
-                        label = { Text("End (HH:mm)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
+
+                // Row 5: From / To (M3 TimePicker via the shared ChooseTime dialog).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("From", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(8.dp))
+                    androidx.compose.material3.Button(onClick = { chooseTimeFor = "start" }) {
+                        Text(formatAmPm(start))
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Text("To", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(8.dp))
+                    androidx.compose.material3.Button(onClick = { chooseTimeFor = "end" }) {
+                        Text(formatAmPm(end))
+                    }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = medium == TeachingMedium.ONLINE,
-                        onClick = { medium = TeachingMedium.ONLINE },
-                        label = { Text("Online") }
-                    )
-                    FilterChip(
-                        selected = medium == TeachingMedium.OFFLINE,
-                        onClick = { medium = TeachingMedium.OFFLINE },
-                        label = { Text("Offline") }
-                    )
-                }
+
                 (localError ?: errorMessage)?.let { message ->
                     Text(
                         message,
@@ -891,30 +938,42 @@ private fun ClassEditorDialog(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+
+                // Pinned actions (wireframe: Cancel / Save bottom-right).
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        localError = null
+                        if (subject.isBlank()) {
+                            localError = "Subject name is required"
+                            return@TextButton
+                        }
+                        if (start >= end) {
+                            localError = "End time must be after start time"
+                            return@TextButton
+                        }
+                        onSave(subject, lecturer, venue, dayIndex, start, end, medium, section, level)
+                    }) { Text("Save") }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                localError = null
-                if (subject.isBlank()) {
-                    localError = "Subject name is required"
-                    return@TextButton
-                }
-                if (!TIME_REGEX.matches(start) || !TIME_REGEX.matches(end)) {
-                    localError = "Times must be HH:mm (e.g. 09:30)"
-                    return@TextButton
-                }
-                if (start >= end) {
-                    localError = "End time must be after start time"
-                    return@TextButton
-                }
-                onSave(subject, lecturer, venue, dayIndex, start, end, medium, section, level)
-            }) { Text("Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
-    )
+    }
+
+    chooseTimeFor?.let { which ->
+        ChooseTimeDialog(
+            initialTime = if (which == "start") start else end,
+            onConfirm = { newTime ->
+                if (which == "start") start = newTime else end = newTime
+                chooseTimeFor = null
+            },
+            onDismiss = { chooseTimeFor = null }
+        )
+    }
 }
 
 // Sprint 8 Task 5: warning composer — Title, Description, optional PDF attachment;

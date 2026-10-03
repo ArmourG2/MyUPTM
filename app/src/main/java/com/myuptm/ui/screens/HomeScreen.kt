@@ -36,7 +36,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavController
 import com.myuptm.data.repository.FirestoreClassRepository
+import com.myuptm.domain.model.AppUser
 import com.myuptm.domain.model.SupportLinks
+import com.myuptm.domain.model.UserRole
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.AnnouncementRow
 import com.myuptm.ui.components.NextClassCard
@@ -46,13 +48,19 @@ import com.myuptm.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(navController: NavController) {
+fun HomeScreen(navController: NavController, user: AppUser? = null) {
     val context = LocalContext.current
+    // Sprint 9: lecturers' Next Class counts only the classes THEY teach.
+    val ownClassesEmail = user?.takeIf { it.role == UserRole.LECTURER }?.email
     val homeViewModel: HomeViewModel = viewModel(
         factory = viewModelFactory {
             initializer {
                 // Sprint 7B: classes come from Firestore (global); posts remain mock.
-                HomeViewModel(FirestoreClassRepository(), com.myuptm.data.repository.FirestorePostsRepository())
+                HomeViewModel(
+                    FirestoreClassRepository(),
+                    com.myuptm.data.repository.FirestorePostsRepository(),
+                    ownClassesOnlyEmail = ownClassesEmail
+                )
             }
         }
     )

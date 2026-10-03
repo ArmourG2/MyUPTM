@@ -46,14 +46,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,7 +76,6 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
-import java.util.Locale
 
 // Wireframe day circles run Sunday-first: S M T W T F S → mapped to our Monday-first indexes.
 private val DAY_LETTERS = listOf("S", "M", "T", "W", "T", "F", "S")
@@ -117,18 +118,22 @@ fun TimetableScreen(
     val viewMode by viewModel.viewMode.collectAsState()
     val weekOffset by viewModel.weekOffset.collectAsState()
 
-    // Sprint 8: lecturers see THEIR OWN classes only (plus editable demo seeds);
-    // students see the whole departmental timetable.
+    // Sprint 9: scoping moved INTO the VM (lecturers get only their own classes).
+    // Kept as a defensive re-filter for lecturer screens in case of a timing gap.
     val visibleTimetable = if (user != null && canManageClasses) {
-        weeklyTimetable.map { day -> day.filter { it.ownerEmail == null || it.ownerEmail == user.email } }
+        weeklyTimetable.map { day -> day.filter { it.ownerEmail == user.email } }
     } else weeklyTimetable
 
     val today = LocalDate.now()
     val scope = rememberCoroutineScope()
 
+    // Observable locale: derived from LocalConfiguration so date formats recompose when the
+    // system locale changes while the screen is open (Locale.getDefault() is non-observable).
+    val locale = LocalConfiguration.current.locales.get(0)
+
     // Daily: pager over day pages + mirrored selected page for the chip rail.
     val dayPagerState = rememberPagerState(initialPage = DAY_BASE, pageCount = { DAY_PAGES })
-    var dailyPage by remember { mutableStateOf(DAY_BASE) }
+    var dailyPage by remember { mutableIntStateOf(DAY_BASE) }
     LaunchedEffect(dayPagerState) {
         snapshotFlow { dayPagerState.currentPage }.collect { dailyPage = it }
     }
@@ -181,10 +186,10 @@ fun TimetableScreen(
     val subtitle = if (viewMode == TimetableViewMode.WEEKLY) {
         val weekStart = today.plusDays(weekOffset * 7L - (today.dayOfWeek.value - 1))
         val weekEnd = weekStart.plusDays(6)
-        val dateFmt = DateTimeFormatter.ofPattern("d MMM", Locale.getDefault())
+        val dateFmt = DateTimeFormatter.ofPattern("d MMM", locale)
         "${weekStart.format(dateFmt)} – ${weekEnd.format(dateFmt)} ${weekEnd.year}"
     } else {
-        dailyDate.format(DateTimeFormatter.ofPattern("EEEE · d MMMM yyyy", Locale.getDefault()))
+        dailyDate.format(DateTimeFormatter.ofPattern("EEEE · d MMMM yyyy", locale))
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -282,7 +287,7 @@ fun TimetableScreen(
                         val pageIndex = DAY_BASE + offset
                         val date = today.plusDays(offset.toLong())
                         DayChip(
-                            label = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                            label = date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale),
                             dateText = date.dayOfMonth.toString(),
                             selected = dailyPage == pageIndex,
                             isToday = offset == 0,
@@ -514,6 +519,7 @@ private fun PlanOptionsPopup(
 
 // Add/Edit plan dialog (approved wireframe): name field, S M T W T F S day circles,
 // From/To buttons opening the "Choose Time" picker, venue field, Cancel/Save.
+// Sprint 9 (owner note 3): day circles are MULTI-SELECT — one plan per chosen day.
 @Composable
 private fun AddPlanDialog(
     title: String,
@@ -523,7 +529,7 @@ private fun AddPlanDialog(
     defaultEnd: String,
     errorMessage: String?,
     onDismiss: () -> Unit,
-    onSave: (name: String, date: LocalDate, startTime: String, endTime: String, venue: String?) -> Unit,
+    onSave: (name: String, dates: List<LocalDate>, startTime: String, endTime: String, venue: String?) -> Unit,
     onDelete: (() -> Unit)? = null
 ) {
     var name by remember { mutableStateOf(initial?.title ?: "") }
@@ -531,13 +537,14 @@ private fun AddPlanDialog(
     var start by remember(initial, defaultStart) { mutableStateOf(initial?.startTime ?: defaultStart) }
     var end by remember(initial, defaultEnd) { mutableStateOf(initial?.endTime ?: defaultEnd) }
     // Sunday-first circles (wireframe); preselect the entry-point's weekday.
-    var circleIndex by remember(initial, anchorDate) {
-        mutableStateOf(CIRCLE_TO_DAY.indexOf(initial?.dayIndex ?: (anchorDate.dayOfWeek.value - 1)))
+    var selectedCircles by remember(initial, anchorDate) {
+        val initialCircle = CIRCLE_TO_DAY.indexOf(initial?.dayIndex ?: (anchorDate.dayOfWeek.value - 1))
+        mutableStateOf(setOf(initialCircle))
     }
     var chooseTimeFor by remember { mutableStateOf<String?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
 
-    // The week the anchor lives in — the chosen circle picks a date inside this week.
+    // The week the anchor lives in — the chosen circles pick dates inside this week.
     val weekStart = anchorDate.minusDays(((anchorDate.dayOfWeek.value) - 1).toLong())
 
     AlertDialog(
@@ -552,10 +559,10 @@ private fun AddPlanDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                // S M T W T F S circles (wireframe) — single-select.
+                // S M T W T F S circles (wireframe) — SPRINT 9: multi-select (toggle).
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     DAY_LETTERS.forEachIndexed { index, letter ->
-                        val selected = circleIndex == index
+                        val selected = index in selectedCircles
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
@@ -564,7 +571,13 @@ private fun AddPlanDialog(
                                     if (selected) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.surfaceVariant
                                 )
-                                .clickable { circleIndex = index },
+                                .clickable {
+                                    // Toggle: tap a selected circle again to unselect
+                                    // (at least one day must remain for a valid save).
+                                    selectedCircles =
+                                        if (selected && selectedCircles.size > 1) selectedCircles - index
+                                        else selectedCircles + index
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -618,8 +631,8 @@ private fun AddPlanDialog(
                     localError = "End time must be after start time"
                     return@TextButton
                 }
-                val date = weekStart.plusDays(CIRCLE_TO_DAY[circleIndex.coerceIn(0, 6)].toLong())
-                onSave(name, date, start, end, venue)
+                val dates = selectedCircles.sorted().map { weekStart.plusDays(CIRCLE_TO_DAY[it].toLong()) }
+                onSave(name, dates, start, end, venue)
             }) { Text("Save") }
         },
         dismissButton = {
@@ -647,10 +660,10 @@ private fun AddPlanDialog(
     }
 }
 
-// "Choose Time" dialog: Material 3 TimePicker (AM/PM wheel per wireframe).
+// Shared (Sprint 9): also used by the lecturer's Add/Edit class dialog.
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ChooseTimeDialog(
+internal fun ChooseTimeDialog(
     initialTime: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
@@ -755,8 +768,8 @@ private fun ClassDetailPopup(session: ClassSession, onDismiss: () -> Unit) {
     }
 }
 
-// "HH:mm" → "10:00am" style label (sketch style, 12h clock).
-private fun formatAmPm(hhmm: String): String {
+// Shared (Sprint 9): also used by the lecturer's Add/Edit class dialog.
+internal fun formatAmPm(hhmm: String): String {
     val h = hhmm.substringBefore(':').toIntOrNull() ?: 0
     val m = hhmm.substringAfter(':').toIntOrNull() ?: 0
     val h12 = if (h % 12 == 0) 12 else h % 12

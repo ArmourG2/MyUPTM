@@ -42,6 +42,10 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
     private val _weeklyTimetable = MutableStateFlow<List<List<ClassSession>>>(emptyList())
     val weeklyTimetable: StateFlow<List<List<ClassSession>>> = _weeklyTimetable.asStateFlow()
 
+    // Sprint 9: the signed-in LECTURER's email, used to scope their Timetable to the
+    // classes THEY teach (ownerEmail binding). Students see the full department list.
+    private var lecturerEmail: String? = null
+
     // Device-local personal plans, only populated for a bound student.
     @OptIn(ExperimentalCoroutinesApi::class)
     private val plansFlow = _boundUser.flatMapLatest { user ->
@@ -83,11 +87,17 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         viewModelScope.launch {
             classRepository.observeClasses().collect { classes ->
-                _weeklyTimetable.value = List(7) { day -> classes.filter { it.dayIndex == day } }
-                detectClassChanges(clashBaseline, classes)
-                if (classes.isNotEmpty() || clashBaseline == null) {
+                // Sprint 9 (owner note 1): lecturer scope — only THEIR classes
+                // (ownerEmail == lecturer email). Demo seeds (ownerEmail == null) and
+                // other lecturers' classes are no longer shown to them.
+                val scoped = lecturerEmail?.let { email ->
+                    classes.filter { it.ownerEmail == email }
+                } ?: classes
+                _weeklyTimetable.value = List(7) { day -> scoped.filter { it.dayIndex == day } }
+                detectClassChanges(clashBaseline, scoped)
+                if (scoped.isNotEmpty() || clashBaseline == null) {
                     // Establish the baseline on the first meaningful snapshot.
-                    if (classes.isNotEmpty()) clashBaseline = classes
+                    if (scoped.isNotEmpty()) clashBaseline = scoped
                 }
             }
         }
@@ -122,62 +132,99 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
 
     // Re-binds the VM to the current signed-in user (activity-scoped VM safety).
     fun bindUser(user: AppUser?) {
+        lecturerEmail = user?.takeIf { it.toPermissions().canManageClassGlobal }?.email
         if (_boundUser.value?.email == user?.email) return
         planRepository = user?.let { DataStorePersonalPlanRepository(getApplication(), it.email) }
         _boundUser.value = user
     }
 
     // ---- Personal plan CRUD (students only) ----
+    // Sprint 9 (owner note 3): the plan dialog's day circles are MULTI-SELECT.
+    // One PersonalPlan is saved per chosen weekday; ALL days are clash-checked
+    // first and any conflict blocks the whole save with the usual message.
 
-    fun addPlan(title: String, date: java.time.LocalDate, startTime: String, endTime: String, venue: String?) {
-        val repo = planRepository ?: return
-        _planError.value = null
-        if (startTime >= endTime) {
-            _planError.value = "End time must be after start time"
-            return
-        }
-        findConflictingClass(date, startTime, endTime)?.let { clash ->
-            _planError.value =
-                "${clash.subjectName} is held ${dayName(clash.dayIndex)} " +
-                    "${clash.startTime}–${clash.endTime}. Unable to add the custom plan."
-            return
-        }
-        viewModelScope.launch {
-            repo.addPlan(
-                PersonalPlan(
-                    id = UUID.randomUUID().toString(),
-                    title = title.trim(),
-                    date = date,
-                    startTime = startTime,
-                    endTime = endTime,
-                    venue = venue?.trim()?.ifEmpty { null }
-                )
-            )
-        }
-    }
-
-    fun updatePlan(
-        plan: PersonalPlan,
+    fun addPlan(
         title: String,
-        date: java.time.LocalDate,
+        dates: List<java.time.LocalDate>,
         startTime: String,
         endTime: String,
         venue: String?
     ) {
         val repo = planRepository ?: return
         _planError.value = null
+        if (dates.isEmpty()) return
         if (startTime >= endTime) {
             _planError.value = "End time must be after start time"
             return
         }
-        findConflictingClass(date, startTime, endTime)?.let { clash ->
+        findConflictingPlanSlot(dates, startTime, endTime)?.let { (clash, _) ->
+            _planError.value =
+                "${clash.subjectName} is held ${dayName(clash.dayIndex)} " +
+                    "${clash.startTime}–${clash.endTime}. Unable to add the custom plan."
+            return
+        }
+        viewModelScope.launch {
+            dates.forEach { date ->
+                repo.addPlan(
+                    PersonalPlan(
+                        id = UUID.randomUUID().toString(),
+                        title = title.trim(),
+                        date = date,
+                        startTime = startTime,
+                        endTime = endTime,
+                        venue = venue?.trim()?.ifEmpty { null }
+                    )
+                )
+            }
+        }
+    }
+
+    fun updatePlan(
+        plan: PersonalPlan,
+        title: String,
+        dates: List<java.time.LocalDate>,
+        startTime: String,
+        endTime: String,
+        venue: String?
+    ) {
+        val repo = planRepository ?: return
+        _planError.value = null
+        if (dates.isEmpty()) return
+        if (startTime >= endTime) {
+            _planError.value = "End time must be after start time"
+            return
+        }
+        // The edited plan moves to the FIRST chosen day; the extra days are added as
+        // new one-time plans (same multi-select semantics as Add).
+        val others = dates.drop(1)
+        findConflictingPlanSlot(listOf(dates.first()) + others, startTime, endTime)?.let { (clash, _) ->
             _planError.value =
                 "${clash.subjectName} is held ${dayName(clash.dayIndex)} " +
                     "${clash.startTime}–${clash.endTime}. Unable to keep the plan in this slot."
             return
         }
         viewModelScope.launch {
-            repo.updatePlan(plan.copy(title = title.trim(), date = date, startTime = startTime, endTime = endTime, venue = venue?.trim()?.ifEmpty { null }))
+            repo.updatePlan(
+                plan.copy(
+                    title = title.trim(),
+                    date = dates.first(),
+                    startTime = startTime,
+                    endTime = endTime,
+                    venue = venue?.trim()?.ifEmpty { null }
+                )
+            )
+            others.forEach { date ->
+                repo.addPlan(
+                    PersonalPlan(
+                        id = UUID.randomUUID().toString(),
+                        title = title.trim(),
+                        date = date,
+                        startTime = startTime,
+                        endTime = endTime,
+                        venue = venue?.trim()?.ifEmpty { null }
+                    )
+                )
+            }
         }
     }
 
@@ -192,9 +239,17 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     // Rule 1: a student cannot place a plan on a slot where a class is held (same weekday).
-    private fun findConflictingClass(date: java.time.LocalDate, startTime: String, endTime: String): ClassSession? =
-        _weeklyTimetable.value.flatten().firstOrNull { cls ->
-            cls.dayIndex == date.dayOfWeek.value - 1 && overlaps(startTime, endTime, cls.startTime, cls.endTime)
+    // Sprint 9: scans ALL selected days at once; returns the first (class, chosen date).
+    private fun findConflictingPlanSlot(
+        dates: List<java.time.LocalDate>,
+        startTime: String,
+        endTime: String
+    ): Pair<ClassSession, java.time.LocalDate>? =
+        dates.firstNotNullOfOrNull { date ->
+            _weeklyTimetable.value.flatten().firstOrNull { cls ->
+                cls.dayIndex == date.dayOfWeek.value - 1 &&
+                    overlaps(startTime, endTime, cls.startTime, cls.endTime)
+            }?.let { cls -> cls to date }
         }
 
     // Rule 2: warn the student when a class is added/moved onto an existing plan.
