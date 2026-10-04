@@ -83,24 +83,16 @@ class FirestoreClassRepository(
         return task.awaitResult().map { }
     }
 
-    // Idempotent demo seed with fixed document ids ("1"…"10"); unowned so any
-    // lecturer may edit/adopt them during the POC. Sprint 8: seeds carry varied
-    // sections + levels so the Class Management filters demo meaningfully.
-    @Suppress("DEPRECATION")
+    // Sprint 9: real departmental timetable (SeedTimetableRepository). Seed carries
+    // ownerEmail per class — SWC3403/3713_01 slots are owned by the POC demo
+    // lecturer so their Timetable/Classes show exactly those slots. Idempotent
+    // fixed document ids ("d1"…"d10"); owner removes old test docs manually.
     private fun seedDemoClasses() {
-        val demo = MockTimetableRepository().getWeeklyTimetable()
+        val demo = SeedTimetableRepository().getWeeklyTimetable()
         demo.forEachIndexed { index, session ->
-            val enriched = session.copy(
-                section = "Section ${(index % 3) + 1}",
-                level = when (index % 3) {
-                    1 -> ClassLevel.DEGREE
-                    2 -> ClassLevel.MASTER
-                    else -> ClassLevel.DIPLOMA
-                }
-            )
             db.collection(COLLECTION)
-                .document(enriched.id)
-                .set(enriched.toFirestoreMap(ownerEmail = null))
+                .document(session.id)
+                .set(session.toFirestoreMap(ownerEmail = session.ownerEmail))
         }
     }
 
@@ -113,13 +105,16 @@ class FirestoreClassRepository(
         "startTime" to startTime,
         "endTime" to endTime,
         "section" to section,
-        "level" to level.name,
+        "levels" to levels.map { it.name },
         "ownerEmail" to ownerEmail,
         "updatedAt" to System.currentTimeMillis()
     )
 
     private fun DocumentSnapshot.toClassSession(): ClassSession? {
         val subjectName = getString("subjectName") ?: return null
+        val levels = (get("levels") as? List<*>)?.mapNotNull { lvl ->
+            (lvl as? String)?.let { s -> runCatching { ClassLevel.valueOf(s) }.getOrNull() }
+        }.orEmpty()
         return ClassSession(
             id = id,
             dayIndex = getLong("dayIndex")?.toInt() ?: 0,
@@ -132,9 +127,14 @@ class FirestoreClassRepository(
             startTime = getString("startTime") ?: "00:00",
             endTime = getString("endTime") ?: "00:00",
             section = getString("section") ?: "",
-            level = getString("level")
-                ?.let { lvl -> runCatching { ClassLevel.valueOf(lvl) }.getOrNull() }
-                ?: ClassLevel.DIPLOMA,
+            // Read the merged levels list; fall back to the legacy single "level".
+            levels = levels.ifEmpty {
+                listOf(
+                    getString("level")
+                        ?.let { lvl -> runCatching { ClassLevel.valueOf(lvl) }.getOrNull() }
+                        ?: ClassLevel.DIPLOMA
+                )
+            },
             ownerEmail = getString("ownerEmail"),
             updatedAt = getLong("updatedAt")
         )

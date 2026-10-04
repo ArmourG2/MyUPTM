@@ -2,6 +2,7 @@ package com.myuptm.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -44,6 +46,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,6 +76,14 @@ import androidx.compose.runtime.LaunchedEffect
 private val DAY_NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 private val TIME_REGEX = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
 
+// Multi-select helper for merged-level chips (Diploma/Degree/Master toggles).
+private fun <T> MutableSet<T>.toggle(value: T): MutableSet<T> =
+    if (contains(value)) {
+        remove(value); this
+    } else {
+        add(value); this
+    }
+
 // Wireframe badge palette (attendance severity): green full / yellow moderate / red high.
 private val GreenBadge = Color(0xFF2E7D32)
 private val YellowBadge = Color(0xFFF9A825)
@@ -84,6 +96,7 @@ private val RedBadge = Color(0xFFC62828)
 @Composable
 fun ClassManagementScreen(
     ownerEmail: String?,
+    onOpenAttendanceRecord: (classId: String, matric: String) -> Unit = { _, _ -> },
     viewModel: ClassManagementViewModel = viewModel()
 ) {
     val weeklyClasses by viewModel.weeklyClasses.collectAsState()
@@ -95,11 +108,25 @@ fun ClassManagementScreen(
     LaunchedEffect(ownerEmail) { viewModel.bindOwner(ownerEmail) }
 
     var warningTargets by remember { mutableStateOf<List<RosterStudent>?>(null) }
+    // Sprint 9: end-of-session confirmation (the old "Close attendance" is now
+    // self-explanatory: confirm → absentees get yellow miss notices).
+    var showEndAttendanceConfirm by remember { mutableStateOf(false) }
 
     var searchText by remember { mutableStateOf("") }
     var selectedLevel by remember { mutableStateOf<ClassLevel?>(null) } // null = All
-    var rosterClass by remember { mutableStateOf<ClassSession?>(null) }
-    var detailStudent by remember { mutableStateOf<RosterStudent?>(null) }
+    // Sprint 9: drill-down state is SAVEABLE (ids only, objects re-derived) so the
+    // system back / gesture back from the Attendance Record screen returns to the
+    // exact Letters screen instead of the Class Management root.
+    var rosterClassId by rememberSaveable { mutableStateOf<String?>(null) }
+    var detailStudentMatric by rememberSaveable { mutableStateOf<String?>(null) }
+    val rosterClass: ClassSession? = rosterClassId?.let { id ->
+        weeklyClasses.flatten().find { it.id == id }
+    }
+    val detailStudent: RosterStudent? = detailStudentMatric?.let { matric ->
+        rosterClass?.let { session ->
+            viewModel.rosterFor(session, letters).find { it.matric.matchesMatric(matric) }
+        }
+    }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingSession by remember { mutableStateOf<ClassSession?>(null) }
     var deletingSession by remember { mutableStateOf<ClassSession?>(null) }
@@ -115,10 +142,10 @@ fun ClassManagementScreen(
     // System back mirrors the in-screen back buttons: student detail → roster → class list,
     // THEN the real screen pop (before this, back skipped straight to Home).
     androidx.activity.compose.BackHandler(enabled = detailStudent != null) {
-        detailStudent = null
+        detailStudentMatric = null
     }
     androidx.activity.compose.BackHandler(enabled = detailStudent == null && rosterClass != null) {
-        rosterClass = null
+        rosterClassId = null
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -130,12 +157,12 @@ fun ClassManagementScreen(
                 if (isStudentView) {
                     BackTitleRow(
                         title = "Letters",
-                        onBack = { detailStudent = null }
+                        onBack = { detailStudentMatric = null }
                     )
                 } else if (isRosterView) {
                     BackTitleRow(
-                        title = "${rosterClass!!.subjectName} · ${rosterClass!!.section.ifEmpty { "No section" }}",
-                        onBack = { rosterClass = null }
+                        title = rosterClass!!.displayCode,
+                        onBack = { rosterClassId = null }
                     )
                 } else {
                     Text(
@@ -153,19 +180,22 @@ fun ClassManagementScreen(
             when {
                 isStudentView -> StudentLetterReview(
                     student = detailStudent!!,
-                    letters = letters.filter {
-                        it.studentMatric.matchesMatric(detailStudent!!.matric)
-                    },
+                    letters = viewModel.lettersFor(detailStudent!!.matric, rosterClass!!, letters),
                     classSession = rosterClass!!,
                     onApprove = viewModel::approveLetter,
                     onOpenDecline = { declineLetter = it },
-                    onWarnStudent = { warningTargets = listOf(detailStudent!!) }
+                    onWarnStudent = { warningTargets = listOf(detailStudent!!) },
+                    onViewAttendance = {
+                        onOpenAttendanceRecord(rosterClass!!.id, detailStudent!!.matric)
+                    }
                 )
                 isRosterView -> StudentRosterView(
-                    students = viewModel.rosterFor(rosterClass!!),
+                    students = viewModel.rosterFor(rosterClass!!, letters),
                     letters = letters,
-                    onStudentClick = { detailStudent = it },
-                    onWarnRed = { warningTargets = it }
+                    subjectName = rosterClass!!.subjectName,
+                    onStudentClick = { detailStudentMatric = it.matric },
+                    onWarnRed = { warningTargets = it },
+                    onEndAttendance = { showEndAttendanceConfirm = true }
                 )
                 else -> ClassListView(
                     weeklyClasses = weeklyClasses,
@@ -175,7 +205,7 @@ fun ClassManagementScreen(
                     canModify = viewModel::canModify,
                     onSearchChange = { searchText = it },
                     onLevelChange = { selectedLevel = it },
-                    onClassClick = { rosterClass = it },
+                    onClassClick = { rosterClassId = it.id },
                     onEdit = { editingSession = it },
                     onDelete = { deletingSession = it },
                     hasClasses = weeklyClasses.any { it.isNotEmpty() }
@@ -204,8 +234,8 @@ fun ClassManagementScreen(
                 showAddDialog = false
                 viewModel.clearStatus()
             },
-            onSave = { subject, lecturer, venue, dayIndex, start, end, medium, section, level ->
-                viewModel.addClass(subject, lecturer, venue, dayIndex, start, end, medium, section, level)
+            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image ->
+                viewModel.addClass(subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image)
                 // Validation errors stay in the dialog via status; success closes it.
                 if (viewModel.status.value == null) showAddDialog = false
             }
@@ -221,8 +251,8 @@ fun ClassManagementScreen(
                 editingSession = null
                 viewModel.clearStatus()
             },
-            onSave = { subject, lecturer, venue, dayIndex, start, end, medium, section, level ->
-                viewModel.updateClass(session, subject, lecturer, venue, dayIndex, start, end, medium, section, level)
+            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image ->
+                viewModel.updateClass(session, subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image)
                 if (viewModel.status.value == null) editingSession = null
             }
         )
@@ -245,6 +275,32 @@ fun ClassManagementScreen(
             },
             dismissButton = {
                 TextButton(onClick = { deletingSession = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Sprint 9: end-of-session confirmation — states plainly what happens, so the
+    // demo narrative is self-explanatory (full system runs it automatically after
+    // QR/PIN closes; the POC triggers the check manually).
+    if (showEndAttendanceConfirm) {
+        AlertDialog(
+            onDismissRequest = { showEndAttendanceConfirm = false },
+            title = { Text("End attendance session?") },
+            text = {
+                Text(
+                    "This marks the ${rosterClass?.displayCode ?: "class"} session as ended. " +
+                        "Students who did not verify their attendance will receive a missed-class " +
+                        "notification and can submit an absence letter for review."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showEndAttendanceConfirm = false
+                    rosterClass?.let { viewModel.closeAttendance(it) }
+                }) { Text("End & notify") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndAttendanceConfirm = false }) { Text("Cancel") }
             }
         )
     }
@@ -305,7 +361,8 @@ private fun ClassListView(
 ) {
     val allClasses = weeklyClasses.flatten()
     val filtered = allClasses.filter { session ->
-        (selectedLevel == null || session.level == selectedLevel) &&
+        // Sprint 9: merged classes (Diploma+Degree) match ANY of their levels.
+        (selectedLevel == null || selectedLevel in session.levels) &&
             (searchText.isBlank() ||
                 session.subjectName.contains(searchText, ignoreCase = true) ||
                 session.section.contains(searchText, ignoreCase = true))
@@ -389,7 +446,7 @@ private fun ClassManagementCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                session.subjectName,
+                session.displayCode,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -397,8 +454,10 @@ private fun ClassManagementCard(
             Spacer(Modifier.height(4.dp))
             Text(
                 buildString {
-                    append(session.section.ifEmpty { "No section" })
-                    append(" · ${session.level.name.lowercase().replaceFirstChar { it.uppercase() }}")
+                    if (session.section.isNotBlank()) append("Section ${session.section} · ")
+                    append(session.levels.joinToString(" · ") { l ->
+                        l.name.lowercase().replaceFirstChar { it.uppercase() }
+                    })
                     if (session.teachingMedium == TeachingMedium.ONLINE) append(" · Online")
                 },
                 style = MaterialTheme.typography.bodyMedium,
@@ -443,8 +502,10 @@ private fun ClassManagementCard(
 private fun StudentRosterView(
     students: List<RosterStudent>,
     letters: List<AbsenceLetter>,
+    subjectName: String,
     onStudentClick: (RosterStudent) -> Unit,
-    onWarnRed: (List<RosterStudent>) -> Unit
+    onWarnRed: (List<RosterStudent>) -> Unit,
+    onEndAttendance: () -> Unit
 ) {
     val redStudents = students.filter { it.missed >= 5 }
     LazyColumn(
@@ -452,13 +513,20 @@ private fun StudentRosterView(
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item(key = "warn_header") {
-            if (redStudents.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    // Sprint 8 Task 5: batch warning for ALL red students of this class.
+        item(key = "roster_actions") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+            ) {
+                // Sprint 9 (Option A): simulates the END of the class session —
+                // students who did not verify attendance receive a yellow
+                // missed-class notice (the automatic check the full system runs
+                // after a QR/PIN session closes; the POC triggers it manually).
+                OutlinedButton(onClick = onEndAttendance) {
+                    Text("End class & notify absentees")
+                }
+                // Sprint 8 Task 5: batch warning for ALL red students of this class.
+                if (redStudents.isNotEmpty()) {
                     androidx.compose.material3.Button(
                         onClick = { onWarnRed(redStudents) },
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = RedBadge)
@@ -474,6 +542,7 @@ private fun StudentRosterView(
         itemsIndexed(students, key = { _, student -> student.name + student.matric }) { _, student ->
             val pendingLetters = letters.count {
                 it.studentMatric.matchesMatric(student.matric) &&
+                    (it.subjectName == null || it.subjectName == subjectName) &&
                     it.status == LetterStatus.PENDING
             }
             RosterCard(
@@ -560,7 +629,8 @@ private fun StudentLetterReview(
     classSession: ClassSession,
     onApprove: (AbsenceLetter) -> Unit,
     onOpenDecline: (AbsenceLetter) -> Unit,
-    onWarnStudent: () -> Unit = {}
+    onWarnStudent: () -> Unit = {},
+    onViewAttendance: () -> Unit = {}
 ) {
     val redOnly = student.missed >= 5
     Column(
@@ -601,6 +671,18 @@ private fun StudentLetterReview(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             CountBox(student.verified.toString(), "VERIFIED", GreenBadge, Modifier.weight(1f))
             CountBox(student.missed.toString(), "MISSED", RedBadge, Modifier.weight(1f))
+        }
+
+        // Sprint 9 wireframe: the blue View Attendance button opens the student's
+        // attendance record (date chip + subject/venue + Attend/Missed chips).
+        Button(
+            onClick = onViewAttendance,
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = androidx.compose.ui.graphics.Color(0xFF42A5F5)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("View Attendance", color = Color.White)
         }
 
         Text(
@@ -766,24 +848,24 @@ private fun RejectionDetailDialog(
 
 @Composable
 private fun ClassEditorDialog(
-    title: String,
-    initial: ClassSession?,
+    title: String,    initial: ClassSession?,
     errorMessage: String?,
     onDismiss: () -> Unit,
     onSave: (
         subject: String,
-        lecturer: String,
         venue: String,
         dayIndex: Int,
         startTime: String,
         endTime: String,
         medium: TeachingMedium,
         section: String,
-        level: ClassLevel
+        levels: List<ClassLevel>,
+        attention: Boolean,
+        reason: String?,
+        imageUri: android.net.Uri?
     ) -> Unit
 ) {
     var subject by remember { mutableStateOf(initial?.subjectName ?: "") }
-    var lecturer by remember { mutableStateOf(initial?.lecturerName ?: "") }
     var venue by remember { mutableStateOf(initial?.venue ?: "") }
     var start by remember {
         mutableStateOf(initial?.startTime ?: "09:00")
@@ -794,7 +876,17 @@ private fun ClassEditorDialog(
     var dayIndex by remember { mutableStateOf(initial?.dayIndex ?: 0) }
     var medium by remember { mutableStateOf(initial?.teachingMedium ?: TeachingMedium.OFFLINE) }
     var section by remember { mutableStateOf(initial?.section ?: "") }
-    var level by remember { mutableStateOf(initial?.level ?: ClassLevel.DIPLOMA) }
+    var levels by remember {
+        mutableStateOf(initial?.levels?.toSet() ?: setOf(ClassLevel.DIPLOMA))
+    }
+    // Sprint 9: lecturer toggle — promotes the change notification to attention/yellow.
+    var attention by remember { mutableStateOf(false) }
+    // Sprint 9: optional context/reason + optional image (like posts).
+    var reason by remember { mutableStateOf("") }
+    var selectedImage by remember { mutableStateOf<android.net.Uri?>(null) }
+    val contextPicker = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? -> selectedImage = uri }
     var dayMenuOpen by remember { mutableStateOf(false) }
     var chooseTimeFor by remember { mutableStateOf<String?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
@@ -838,45 +930,37 @@ private fun ClassEditorDialog(
                     )
                 }
 
-                // Row 2: programme level chips (Diploma / Degree / Master).
+                // Row 2: programme level chips (MULTI-select — merged classes like
+                // SWC3403/3713 serve Diploma AND Degree in one section).
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     FilterChip(
-                        selected = level == ClassLevel.DIPLOMA,
-                        onClick = { level = ClassLevel.DIPLOMA },
+                        selected = ClassLevel.DIPLOMA in levels,
+                        onClick = { levels = levels.toMutableSet().toggle(ClassLevel.DIPLOMA) },
                         label = { Text("Diploma") },
                         modifier = Modifier.weight(1f)
                     )
                     FilterChip(
-                        selected = level == ClassLevel.DEGREE,
-                        onClick = { level = ClassLevel.DEGREE },
+                        selected = ClassLevel.DEGREE in levels,
+                        onClick = { levels = levels.toMutableSet().toggle(ClassLevel.DEGREE) },
                         label = { Text("Degree") },
                         modifier = Modifier.weight(1f)
                     )
                     FilterChip(
-                        selected = level == ClassLevel.MASTER,
-                        onClick = { level = ClassLevel.MASTER },
+                        selected = ClassLevel.MASTER in levels,
+                        onClick = { levels = levels.toMutableSet().toggle(ClassLevel.MASTER) },
                         label = { Text("Master") },
                         modifier = Modifier.weight(1f)
                     )
                 }
 
-                // Row 3: Lecturer Name | Venue
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = lecturer,
-                        onValueChange = { lecturer = it },
-                        label = { Text("Lecturer Name") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = venue,
-                        onValueChange = { venue = it },
-                        label = { Text("Venue") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                // Row 3: Venue (full width — the lecturer is the ACCOUNT, no name field).
+                OutlinedTextField(
+                    value = venue,
+                    onValueChange = { venue = it },
+                    label = { Text("Venue") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 // Row 4: day dropdown | Online/Offline segmented toggle.
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -931,6 +1015,51 @@ private fun ClassEditorDialog(
                     }
                 }
 
+                // Sprint 9: attention toggle — students receive this change as a
+                // yellow reminder instead of a normal blue update.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Mark change as attention (yellow)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    androidx.compose.material3.Switch(
+                        checked = attention,
+                        onCheckedChange = { attention = it }
+                    )
+                }
+
+                // Optional context/reason pushed into the notification detail.
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    label = { Text("Context / reason (optional)") },
+                    placeholder = { Text("e.g. Room swap for this week only") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Optional image shown on the notification detail (like posts).
+                selectedImage?.let { uri ->
+                    coil3.compose.AsyncImage(
+                        model = coil3.request.ImageRequest.Builder(LocalContext.current).data(uri).build(),
+                        contentDescription = "Notification image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+                    TextButton(onClick = { selectedImage = null }) { Text("Remove image") }
+                } ?: run {
+                    TextButton(
+                        onClick = { contextPicker.launch("image/*") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Attach image (optional)") }
+                }
+
                 (localError ?: errorMessage)?.let { message ->
                     Text(
                         message,
@@ -953,11 +1082,18 @@ private fun ClassEditorDialog(
                             localError = "Subject name is required"
                             return@TextButton
                         }
+                        if (levels.isEmpty()) {
+                            localError = "Pick at least one programme level"
+                            return@TextButton
+                        }
                         if (start >= end) {
                             localError = "End time must be after start time"
                             return@TextButton
                         }
-                        onSave(subject, lecturer, venue, dayIndex, start, end, medium, section, level)
+                        onSave(
+                            subject, venue, dayIndex, start, end, medium, section, levels.toList(),
+                            attention, reason.trim().ifBlank { null }, selectedImage
+                        )
                     }) { Text("Save") }
                 }
             }

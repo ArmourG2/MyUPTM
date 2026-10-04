@@ -13,7 +13,14 @@ object MyUptmRoutes {
     const val ADMIN_DASHBOARD = "admin_dashboard"
     const val NOTIFICATIONS = "notifications"
     const val ADD_POST = "add_post"
+    // Sprint 9: notification detail (post-detail style), academic overview pages.
+    const val NOTIF_DETAIL = "notif_detail/{notifId}"
+    const val ENROLLED_SECTIONS = "enrolled_sections"
+    const val WARNING_LETTERS = "warning_letters"
+    const val ATTENDANCE_RECORD = "attendance_record/{classId}/{matric}"
 
     // Helper: substitutes the real id into the pattern
     fun postDetail(postId: String) = "post_detail/$postId"
+
+    fun notifDetail(notifId: String) = "notif_detail/$notifId"
 }

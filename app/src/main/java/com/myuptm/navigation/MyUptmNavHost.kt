@@ -25,10 +25,14 @@ import com.myuptm.navigation.MyUptmRoutes.HOME
 import com.myuptm.navigation.MyUptmRoutes.SIGN_IN
 import com.myuptm.domain.model.toPermissions
 import com.myuptm.ui.screens.AddPostScreen
+import com.myuptm.ui.screens.AttendanceRecordScreen
 import com.myuptm.ui.screens.AttendanceScreen
 import com.myuptm.ui.screens.ClassManagementScreen
+import com.myuptm.ui.screens.EnrolledSectionsScreen
 import com.myuptm.ui.screens.HomeScreen
+import com.myuptm.ui.screens.NotificationDetailScreen
 import com.myuptm.ui.screens.NotificationsScreen
+import com.myuptm.ui.screens.WarningLettersScreen
 import com.myuptm.ui.screens.PostDetailScreen
 import com.myuptm.ui.screens.PostsScreen
 import com.myuptm.ui.screens.ProfileScreen
@@ -124,7 +128,16 @@ fun MyUptmNavHost(
             when {
                 record == null -> LoadingBox()
                 record.toPermissions().canManageClassGlobal ->
-                    ClassManagementScreen(ownerEmail = record.email)
+                    ClassManagementScreen(
+                        ownerEmail = record.email,
+                        onOpenAttendanceRecord = { classId, matric ->
+                            navController.navigate(
+                                MyUptmRoutes.ATTENDANCE_RECORD
+                                    .replace("{classId}", java.net.URLEncoder.encode(classId, "utf-8"))
+                                    .replace("{matric}", java.net.URLEncoder.encode(matric, "utf-8"))
+                            )
+                        }
+                    )
                 else -> Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -136,6 +149,40 @@ fun MyUptmNavHost(
         composable(MyUptmRoutes.NOTIFICATIONS) {
             NotificationsScreen(
                 user = userRecord,
+                onBackClick = { navController.popBackStack() },
+                onOpenDetail = { id -> navController.navigate(MyUptmRoutes.notifDetail(id)) }
+            )
+        }
+
+        composable(
+            route = MyUptmRoutes.NOTIF_DETAIL,
+            arguments = listOf(navArgument("notifId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val notifId = backStackEntry.arguments?.getString("notifId").orEmpty()
+            NotificationDetailScreen(notifId = notifId, onBackClick = { navController.popBackStack() })
+        }
+
+        composable(MyUptmRoutes.ENROLLED_SECTIONS) {
+            EnrolledSectionsScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        composable(MyUptmRoutes.WARNING_LETTERS) {
+            WarningLettersScreen(
+                onOpenDetail = { id -> navController.navigate(MyUptmRoutes.notifDetail(id)) },
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = MyUptmRoutes.ATTENDANCE_RECORD,
+            arguments = listOf(
+                navArgument("classId") { type = NavType.StringType },
+                navArgument("matric") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            AttendanceRecordScreen(
+                classId = backStackEntry.arguments?.getString("classId").orEmpty(),
+                matric = backStackEntry.arguments?.getString("matric").orEmpty(),
                 onBackClick = { navController.popBackStack() }
             )
         }

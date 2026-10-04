@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Badge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -44,6 +46,7 @@ import com.myuptm.ui.components.AnnouncementRow
 import com.myuptm.ui.components.NextClassCard
 import com.myuptm.ui.components.SupportLinkTile
 import com.myuptm.ui.components.openUrl
+import com.myuptm.viewmodel.InboxViewModel
 import com.myuptm.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +69,12 @@ fun HomeScreen(navController: NavController, user: AppUser? = null) {
     )
     val uiState by homeViewModel.uiState.collectAsState()
 
+    // Sprint 9: red unread dot on the Home bell (activity-scoped inbox).
+    val inboxViewModel: com.myuptm.viewmodel.InboxViewModel = viewModel(
+        viewModelStoreOwner = context as androidx.lifecycle.ViewModelStoreOwner
+    )
+    val inbox by inboxViewModel.inbox.collectAsState()
+
     // Sprint 7B: local notifications require POST_NOTIFICATIONS on Android 13+.
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -87,7 +96,17 @@ fun HomeScreen(navController: NavController, user: AppUser? = null) {
                     // Sprint 7B: opens the notification inbox (POC of B-004).
                     onClick = { navController.navigate(MyUptmRoutes.NOTIFICATIONS) }
                 ) {
-                    Icon(Icons.Filled.Notifications, contentDescription = "Notifications")
+                    // Sprint 9: red unread dot — a targeted application-level alert
+                    // on the bell that clears when the inbox is opened.
+                    BadgedBox(
+                        badge = {
+                            if (inbox.unread > 0) {
+                                Badge(containerColor = androidx.compose.ui.graphics.Color(0xFFC62828))
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Filled.Notifications, contentDescription = "Notifications")
+                    }
                 }
             },
             windowInsets = WindowInsets(0, 0, 0, 0)

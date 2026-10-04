@@ -64,23 +64,10 @@ fun AttendanceScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // Sprint 8 Task 4 (part 2): absence letters now create a real Firestore record.
-    val attendanceViewModel: AttendanceViewModel = viewModel()
-    val attendanceState by attendanceViewModel.uiState.collectAsState()
-
-    var showLetterConfirm by remember { mutableStateOf(false) }
-
-    val pdfPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { attendanceViewModel.submitAbsenceLetter(it, className = null) }
-    }
-
-    LaunchedEffect(attendanceState.submitSuccess) {
-        if (attendanceState.submitSuccess) {
-            snackbarHostState.showSnackbar("Absence letter submitted — pending lecturer review")
-        }
-    }
+    // Sprint 9: the absence-letter upload moved to Profile (Academic Overview) and the
+    // notification detail page — this screen will be rebuilt around a real camera
+    // (QR) and a working PIN in a later task.
+    LaunchedEffect(Unit) { }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
         Column(
@@ -92,62 +79,6 @@ fun AttendanceScreen() {
         ) {
             Spacer(Modifier.height(32.dp))
             Text("Attendance Verification", style = MaterialTheme.typography.headlineSmall)
-
-            Button(
-                onClick = { showLetterConfirm = true },
-                enabled = !attendanceState.isSubmitting,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (attendanceState.isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(if (attendanceState.isSubmitting) "Uploading Absence Letter..." else "Upload Absence Letter (PDF)")
-            }
-
-            // Sprint 8 Task 5 (point 3): NO-CANCEL policy made explicit BEFORE submitting.
-            if (showLetterConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showLetterConfirm = false },
-                    title = { Text("Submit absence letter?") },
-                    text = { Text("Once submitted the letter cannot be cancelled. The lecturer will review it and you will be notified of the decision. Continue?") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            showLetterConfirm = false
-                            pdfPickerLauncher.launch("application/pdf")
-                        }) { Text("Continue") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showLetterConfirm = false }) { Text("Back") }
-                    }
-                )
-            }
-
-            attendanceState.submitError?.let { err ->
-                Text(
-                    "Error: $err",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-
-            // Sprint 8: the student sees the review status of their letters.
-            if (attendanceState.myLetters.isNotEmpty()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    attendanceState.myLetters.take(3).forEach { letter ->
-                        Text(
-                            "Letter ${letter.status.name.lowercase().replaceFirstChar { it.uppercase() }}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = when (letter.status) {
-                                LetterStatus.APPROVED -> MaterialTheme.colorScheme.primary
-                                LetterStatus.DECLINED -> MaterialTheme.colorScheme.error
-                                LetterStatus.PENDING -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                    }
-                }
-            }
 
             Spacer(Modifier.height(16.dp))
 

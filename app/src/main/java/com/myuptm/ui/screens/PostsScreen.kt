@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -59,7 +60,37 @@ fun PostsScreen(
                 contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(posts) { post ->
+                // Sprint 9: tier sections mirror the notifications screen —
+                // Important (red) pinned on top, Updates (yellow first, then blue).
+                val important = posts.filter { it.importance == "important" }
+                val attention = posts.filter { it.importance == "attention" }
+                val normal = posts.filter { it.importance != "important" && it.importance != "attention" }
+
+                if (important.isNotEmpty()) {
+                    item(key = "important_header") {
+                        Text(
+                            "Important",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = androidx.compose.ui.graphics.Color(0xFFE53935)
+                        )
+                    }
+                    items(important, key = { it.id }) { post ->
+                        PostCard(
+                            post = post,
+                            onClick = { navController.navigate(MyUptmRoutes.postDetail(post.id)) }
+                        )
+                    }
+                }
+
+                item(key = "updates_header") {
+                    Text(
+                        "Updates",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                items(attention + normal, key = { it.id }) { post ->
                     PostCard(
                         post = post,
                         onClick = { navController.navigate(MyUptmRoutes.postDetail(post.id)) }

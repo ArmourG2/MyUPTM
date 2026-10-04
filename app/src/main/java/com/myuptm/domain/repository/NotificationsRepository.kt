@@ -14,6 +14,7 @@ interface NotificationsRepository {
     // Writes a new notification document that every device will pick up.
     // Sprint 8 (Task 5): targetMatric delivers to one student only (null = everyone);
     // attachment* link to a Cloudinary upload (warning letters).
+    // Sprint 9: staffOnly routes the doc to LECTURER/ADMIN inboxes only.
     suspend fun sendNotification(
         type: NotificationType,
         title: String,
@@ -21,6 +22,10 @@ interface NotificationsRepository {
         senderName: String,
         targetMatric: String? = null,
         attachmentUrl: String? = null,
-        attachmentName: String? = null
+        attachmentName: String? = null,
+        staffOnly: Boolean = false,
+        importance: String? = null,
+        studentOnly: Boolean = false,
+        imageUrl: String? = null
     ): Result<Unit>
 }

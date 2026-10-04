@@ -10,5 +10,8 @@ data class Post(
     // (authorEmail gates deletion client-side) + createdAt for ordering.
     val imageUrl: String? = null,
     val authorEmail: String? = null,
-    val createdAt: Long? = null
+    val createdAt: Long? = null,
+    // Sprint 9: tier mirror of the pushed notification — "important" (red bar,
+    // Pinned section) / "attention" (yellow) / null-others (blue, daily news).
+    val importance: String? = null
 )

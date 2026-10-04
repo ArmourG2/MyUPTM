@@ -3,12 +3,14 @@ package com.myuptm.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
 import com.myuptm.data.repository.FirestoreClassRepository
 import com.myuptm.data.repository.FirestoreNotificationsRepository
+import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
+import com.myuptm.data.repository.FirestoreProfileRepository
 import com.myuptm.data.repository.MockAttendanceRoster
-import com.myuptm.data.repository.RealCloudinaryRepository
+import com.myuptm.data.repository.matchesMatric
 import com.myuptm.data.repository.RosterStudent
+import com.myuptm.data.repository.RealCloudinaryRepository
 import com.myuptm.domain.model.AbsenceLetter
 import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
@@ -24,9 +26,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-// Sprint 7B: global class CRUD for lecturers. Ownership rule: a lecturer may only
-// modify classes they created (ownerEmail == their email) or the unowned demo seeds.
-// Every successful change fires a CLASS_UPDATE notification so students stay in sync.
+// Sprint 7B: global class CRUD for lecturers. Ownership rule: colleges may only
+// modify the classes they own (ownerEmail == their email). Every successful change
+// fires a CLASS_UPDATE notification so students stay in sync.
+// Sprint 9: lecturers see ONLY their own classes (scoping in the collector), the
+// lecturer name comes from the ACCOUNT profile (no field in the editor), classes
+// carry a SET of programme levels (merged Diploma/Degree sections), and rosters
+// compute LIVE missed counts from the student's submitted letters.
 class ClassManagementViewModel(application: Application) : AndroidViewModel(application) {
 
     // Sprint 9: lecturer email for classes scoping — must be bound by the screen
@@ -34,12 +40,18 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     private val classRepository: ClassRepository = FirestoreClassRepository()
     private val notificationsRepository: NotificationsRepository = FirestoreNotificationsRepository()
     private val lettersRepository: AbsenceLetterRepository = FirestoreAbsenceLetterRepository()
+    private val profileRepository: FirestoreProfileRepository = FirestoreProfileRepository()
     private val cloudinaryRepository = RealCloudinaryRepository(application)
 
     // The signed-in lecturer's email; drives "only MY classes" scoping.
     private var ownerEmail: String? = null
 
-    // Global classes grouped by day (index 0 = Monday).
+    // Sprint 9: the class owner's display name comes straight from the account
+    // profile — the Add/Edit editor no longer asks for a lecturer name.
+    private val _lecturerDisplayName = MutableStateFlow<String?>(null)
+    private val lecturerDisplayName: String? get() = _lecturerDisplayName.value
+
+    // Global classes grouped by day (index 0 = Monday), scoped to the owner.
     private val _weeklyClasses = MutableStateFlow<List<List<ClassSession>>>(emptyList())
     val weeklyClasses: StateFlow<List<List<ClassSession>>> = _weeklyClasses.asStateFlow()
 
@@ -59,7 +71,7 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch {
             classRepository.observeClasses().collect { classes ->
                 // Sprint 9: lecturer scope — ONLY classes they teach
-                // (ownerEmail == ownerEmail). Demo seeds (ownerEmail == null) are
+                // (ownerEmail == ownerEmail). Department seeds (ownerEmail == null) are
                 // hidden from every lecturer; they own their own classes.
                 val scoped = ownerEmail?.let { email ->
                     classes.filter { it.ownerEmail == email }
@@ -74,12 +86,29 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    // Sprint 9 roster binding: sections carry REAL student names/matrics (owner-baked,
-    // display-only; only AM2412018161 has an account). Lookup is by the class's SECTION
-    // (Subject_XX grouping), so every section shows its own list — not the old
-    // classId-hash rotation of one name pool across all classes.
-    fun rosterFor(classSession: ClassSession): List<RosterStudent> =
-        MockAttendanceRoster.studentsFor(classSession.section)
+    // Sprint 9 roster binding: rosters carry REAL student names/matrics baked from the
+    // owner's section lists (display-only; only
+    // AM2412018161 = AKMAL IRFAN has an account). The demo student's counts are LIVE:
+    // every PENDING/APPROVED letter they submitted reduces their missed count by 1
+    // (a DECLINED letter restores the absence). Sprint 9: letters are PER-CLASS —
+    // only letters bound to THIS class's subject (or legacy subject-less ones) count.
+    fun rosterFor(classSession: ClassSession, letters: List<AbsenceLetter>): List<RosterStudent> {
+        val approved = lettersFor(MockAttendanceRoster.DEMO_MATRIC, classSession, letters)
+            .count { it.status == LetterStatus.APPROVED }
+        return MockAttendanceRoster.studentsFor(
+            classSession.section,
+            classSession.subjectName,
+            approved
+        )
+    }
+
+    // Letters relevant to ONE student in ONE class (subject-bound; legacy
+    // subject-less letters stay visible everywhere for backward compatibility).
+    fun lettersFor(studentMatric: String, classSession: ClassSession, letters: List<AbsenceLetter>): List<AbsenceLetter> =
+        letters.filter {
+            it.studentMatric.matchesMatric(studentMatric) &&
+                (it.subjectName == null || it.subjectName == classSession.subjectName)
+        }
 
     // APPROVE: letter status → APPROVED + notify the student (announcement channel).
     fun approveLetter(letter: AbsenceLetter) {
@@ -139,7 +168,7 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                     val uploaded = cloudinaryRepository.uploadFile(uri, FileType.PDF)
                         .getOrElse { throw it }
                     uploaded to uri.lastPathSegment.orEmpty().ifEmpty { "warning_attachment.pdf" }
-                } ?: (null to null)
+                } ?: null to null
                 students.forEach { student ->
                     notificationsRepository.sendNotification(
                         type = NotificationType.ANNOUNCEMENT,
@@ -147,8 +176,7 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                         message = buildString {
                             append(description)
                             append("\n\nClass: ")
-                            append(classSession.subjectName)
-                            append(" (").append(classSession.section).append(")")
+                            append(classSession.displayCode)
                             if (name != null) append("\nAttachment available in this inbox.")
                         },
                         senderName = classSession.lecturerName,
@@ -174,21 +202,29 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         _status.value = null
     }
 
-    // Re-binds to the signed-in lecturer (activity-scoped VM safety).
+    // Re-binds to the signed-in lecturer (activity-scoped VM safety) + their profile.
     fun bindOwner(email: String?) {
         ownerEmail = email
+        if (email != null && _lecturerDisplayName.value == null) {
+            viewModelScope.launch {
+                _lecturerDisplayName.value = profileRepository.getUserProfile().getOrNull()
+                    ?.fullName ?: email
+            }
+        }
     }
 
     fun addClass(
         subjectName: String,
-        lecturerName: String,
         venue: String,
         dayIndex: Int,
         startTime: String,
         endTime: String,
         medium: TeachingMedium,
         section: String,
-        level: ClassLevel
+        levels: List<ClassLevel>,
+        attention: Boolean,
+        reason: String?,
+        imageUri: android.net.Uri?
     ) {
         if (!validate(subjectName, startTime, endTime)) return
         viewModelScope.launch {
@@ -196,21 +232,24 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                 id = "", // document id is assigned by Firestore
                 dayIndex = dayIndex,
                 subjectName = subjectName.trim(),
-                lecturerName = lecturerName.trim(),
+                lecturerName = lecturerDisplayName ?: ownerEmail ?: "",
                 venue = venue.trim(),
                 teachingMedium = medium,
                 startTime = startTime,
                 endTime = endTime,
                 section = section.trim(),
-                level = level
+                levels = levels.ifEmpty { listOf(ClassLevel.DIPLOMA) }
             )
             classRepository.addClass(session)
                 .onSuccess {
                     _status.value = "Class added"
                     notifyChange(
                         title = "New class added",
-                        message = "${session.subjectName}: ${dayName(dayIndex)} $startTime–$endTime at ${session.venue}.",
-                        senderName = session.lecturerName
+                        message = "${session.displayCode}: ${dayName(dayIndex)} $startTime–$endTime at ${session.venue}.",
+                        senderName = session.lecturerName,
+                        attention = attention,
+                        reason = reason,
+                        imageUri = imageUri
                     )
                 }
                 .onFailure { _status.value = it.message ?: "Could not add class" }
@@ -220,39 +259,47 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     fun updateClass(
         original: ClassSession,
         subjectName: String,
-        lecturerName: String,
         venue: String,
         dayIndex: Int,
         startTime: String,
         endTime: String,
         medium: TeachingMedium,
         section: String,
-        level: ClassLevel
+        levels: List<ClassLevel>,
+        attention: Boolean,
+        reason: String?,
+        imageUri: android.net.Uri?
     ) {
         if (!validate(subjectName, startTime, endTime)) return
         viewModelScope.launch {
             val updated = original.copy(
                 subjectName = subjectName.trim(),
-                lecturerName = lecturerName.trim(),
                 venue = venue.trim(),
                 dayIndex = dayIndex,
                 startTime = startTime,
                 endTime = endTime,
                 teachingMedium = medium,
                 section = section.trim(),
-                level = level
+                levels = levels.ifEmpty { listOf(ClassLevel.DIPLOMA) }
             )
             classRepository.updateClass(updated)
                 .onSuccess {
                     _status.value = "Class updated"
                     val slotChanged = original.dayIndex != dayIndex || original.startTime != startTime
                     val message = if (slotChanged) {
-                        "${updated.subjectName} moved from ${dayName(original.dayIndex)} " +
+                        "${updated.displayCode} moved from ${dayName(original.dayIndex)} " +
                             "${original.startTime}–${original.endTime} to ${dayName(dayIndex)} $startTime–$endTime."
                     } else {
-                        "${updated.subjectName} updated: ${dayName(dayIndex)} $startTime–$endTime at ${updated.venue}."
+                        "${updated.displayCode} updated: ${dayName(dayIndex)} $startTime–$endTime at ${updated.venue}."
                     }
-                    notifyChange(title = "Class update", message = message, senderName = updated.lecturerName)
+                    notifyChange(
+                        title = "Class update",
+                        message = message,
+                        senderName = updated.lecturerName,
+                        attention = attention,
+                        reason = reason,
+                        imageUri = imageUri
+                    )
                 }
                 .onFailure { _status.value = it.message ?: "Could not update class" }
         }
@@ -265,7 +312,7 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                     _status.value = "Class removed"
                     notifyChange(
                         title = "Class cancelled",
-                        message = "${session.subjectName} on ${dayName(session.dayIndex)} " +
+                        message = "${session.displayCode} on ${dayName(session.dayIndex)} " +
                             "${session.startTime}–${session.endTime} has been cancelled.",
                         senderName = session.lecturerName
                     )
@@ -274,8 +321,70 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    private suspend fun notifyChange(title: String, message: String, senderName: String) {
-        notificationsRepository.sendNotification(NotificationType.CLASS_UPDATE, title, message, senderName)
+    private suspend fun notifyChange(
+        title: String,
+        message: String,
+        senderName: String,
+        attention: Boolean = false,
+        reason: String? = null,
+        imageUri: android.net.Uri? = null
+    ) {
+        // Sprint 9: the class editor's toggle promotes this change to an attention
+        // (yellow) notification; otherwise it stays a normal (blue) update.
+        // Changes are STUDENT-ONLY news — lecturers wrote them, they don't need
+        // them in their own inbox. Optional reason/context + optional image
+        // (Cloudinary, like posts) enrich the detail page; no filler when omitted.
+        notificationsRepository.sendNotification(
+            NotificationType.CLASS_UPDATE,
+            title,
+            buildString {
+                append(message)
+                if (!reason.isNullOrBlank()) {
+                    append("\n\n")
+                    append(reason.trim())
+                }
+            },
+            senderName,
+            studentOnly = true,
+            importance = if (attention) "attention" else "normal",
+            imageUrl = imageUri?.let { uri ->
+                cloudinaryRepository.uploadFile(uri, FileType.IMAGE).getOrNull()
+            }
+        )
+    }
+
+    // Sprint 9 (Option A): "Close attendance" — the lecturer closes a slot and every
+    // student of the section gets a YELLOW missed-class notice (roster-wide; only
+    // real accounts actually receive theirs). Submitting a letter excuse = the red
+    // / yellow clearing path already wired for the demo.
+    fun closeAttendance(classSession: ClassSession) {
+        viewModelScope.launch {
+            runCatching {
+                val roster = MockAttendanceRoster.studentsFor(
+                    classSession.section,
+                    classSession.subjectName,
+                    approvedLetters = 0
+                )
+                roster.forEach { student ->
+                    notificationsRepository.sendNotification(
+                        NotificationType.ANNOUNCEMENT,
+                        title = "You missed ${classSession.displayCode}",
+                        message = "Your attendance was not verified for ${classSession.displayCode} " +
+                            "(${dayName(classSession.dayIndex)} ${classSession.startTime}–${classSession.endTime}). " +
+                            "If your absence is excused, open this notification and submit your absence letter.",
+                        senderName = classSession.lecturerName,
+                        targetMatric = student.matric,
+                        importance = "attention",
+                        studentOnly = true
+                    ).getOrThrow()
+                }
+                roster.size
+            }.onSuccess { count ->
+                _status.value = "Session ended — $count missed-class notice(s) sent to students who did not verify"
+            }.onFailure { e ->
+                _status.value = e.message ?: "Could not end the attendance session"
+            }
+        }
     }
 
     private fun validate(subjectName: String, startTime: String, endTime: String): Boolean {

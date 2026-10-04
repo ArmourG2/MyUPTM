@@ -730,7 +730,7 @@ private fun ClassDetailPopup(session: ClassSession, onDismiss: () -> Unit) {
                     }
                     Spacer(Modifier.height(28.dp))
                     Text(
-                        session.subjectName,
+                        session.displayCode,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = onSurface,

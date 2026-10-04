@@ -24,6 +24,8 @@ class PostsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: PostsRepository = FirestorePostsRepository()
     private val cloudinaryRepository = RealCloudinaryRepository(application)
+    // Sprint 9: important posts push to the notification section for every role.
+    private val notificationsRepository = com.myuptm.data.repository.FirestoreNotificationsRepository()
 
     private val _posts = MutableStateFlow<List<Post>>(emptyList())
     val posts: StateFlow<List<Post>> = _posts.asStateFlow()
@@ -57,7 +59,8 @@ class PostsViewModel(application: Application) : AndroidViewModel(application) {
         body: String,
         tag: String,
         imageUri: Uri?,
-        authorEmail: String?
+        authorEmail: String?,
+        importance: String? = null
     ) {
         if (_submitState.value.isSubmitting) return
         _submitState.value = SubmitState(isSubmitting = true)
@@ -74,9 +77,21 @@ class PostsViewModel(application: Application) : AndroidViewModel(application) {
                     facultyTag = tag.trim().ifEmpty { "MyUPTM" },
                     imageUrl = imageUrl,
                     authorEmail = authorEmail,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = System.currentTimeMillis(),
+                    importance = importance
                 )
                 repository.addPost(post).getOrThrow()
+                // Sprint 9: every published post ALSO lands in the notification
+                // section, tiered by the author's importance choice (Normal → blue,
+                // Attention → yellow, Important → red & pushed to staff too).
+                notificationsRepository.sendNotification(
+                    com.myuptm.domain.model.NotificationType.ANNOUNCEMENT,
+                    title = post.title,
+                    message = post.snippet,
+                    senderName = post.facultyTag,
+                    staffOnly = false,
+                    importance = importance
+                ).getOrThrow()
             }.onSuccess {
                 _submitState.value = SubmitState(submitted = true)
             }.onFailure { e ->
