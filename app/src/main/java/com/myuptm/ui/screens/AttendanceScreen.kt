@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,6 +81,7 @@ import com.myuptm.viewmodel.AttendanceCheckInViewModel
 import com.myuptm.viewmodel.AttendanceCheckInViewModel.CheckInUiState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -347,36 +349,61 @@ private fun ScannerStage(
 // a 2.5 s cooldown between decodes so one frame never double-fires a verify,
 // plus a pause flag while a verification is in flight.
 //
-// Frame watchdog (Sprint 12): MIUI's camera HAL occasionally STALLS the stream
-// mid-run (one washed-out frame stays on screen, camera indicator stays on) —
-// seen when moving the phone around. Recovery = full unbind/rebind, the same
-// thing the PIN-toggle workaround does by hand. The analyzer timestamp every
-// arriving frame; a coroutine marks the scanner dead when nothing arrives for
-// WATCHDOG_TIMEOUT_MS while it should be live, then bumps [rebindKey] to
-// remount this composable from scratch. Capped retries prevent a hot loop.
+// Frame watchdog (Sprint 12): MIUI's camera HAL stalls the stream mid-run —
+// device-log verified: the AF stats node spams errors until fence syncs fail,
+// then CameraX gets fatal device errors (code 4) and frames stop arriving
+// (one washed-out frame stays on screen; the camera indicator stays on).
+// Recovery = full unbind/rebind, the same thing the PIN-toggle workaround
+// does by hand. The analyzer timestamps EVERY arriving frame; a watchdog
+// coroutine marks the scanner dead when nothing arrives for
+// WATCHDOG_TIMEOUT_MS while it should be live → the outer composable
+// unmounts the body (spinner), waits REBIND_GAP_MS for the old graph to
+// fully close, then remounts it fresh (the gap avoids the "OPEN +
+// GRAPH_STARTED" rebind race seen in the logs). Retry budget self-heals
+// after a healthy stretch so a later stall still auto-recovers.
 @Composable
 private fun CameraScanner(
     onCode: (String) -> Unit,
     active: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     // Remount key: bumped by the stall watchdog → DisposableEffect/LaunchedEffect
     // re-run from scratch (fresh bind = fresh streams, exactly like the manual
     // PIN toggle recovery).
     var rebindKey by remember { mutableStateOf(0) }
+    var rebinding by remember { mutableStateOf(false) }
     var stalled by remember { mutableStateOf(false) }
+    var stallCount by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
-    key(rebindKey) {
+    // Self-healing budget: a healthy stretch means the current graph is good —
+    // clear the retry counter so a LATER stall auto-recovers again.
+    LaunchedEffect(rebindKey, rebinding) {
+        if (!rebinding) {
+            delay(30_000L)
+            stallCount = 0
+        }
+    }
+
+    if (rebinding) {
+        Box(modifier, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+    } else key(rebindKey) {
         // Inner scanner body — everything below remounts on rebindKey bump.
         ScannerBody(
             onCode = onCode,
             active = active,
             generation = rebindKey,
             onStalled = {
-                if (rebindKey < MAX_REBINDS) {
-                    rebindKey++
+                if (stallCount < MAX_REBINDS && !rebinding) {
+                    stallCount++
+                    scope.launch {
+                        // Unmount first (spinner), give CameraX a beat to fully
+                        // close the dead graph, THEN mount fresh — no overlap.
+                        rebinding = true
+                        delay(REBIND_GAP_MS)
+                        rebindKey++
+                        rebinding = false
+                    }
                 } else {
                     stalled = true // give up: surface a manual-restart hint
                 }
@@ -396,7 +423,8 @@ private fun CameraScanner(
             Button(
                 onClick = {
                     stalled = false
-                    rebindKey = 0
+                    stallCount = 0
+                    rebindKey++
                 }
             ) { Text("Restart camera") }
         }
@@ -442,7 +470,7 @@ private fun ScannerBody(
     // report to the parent for a full remount.
     LaunchedEffect(active, generation) {
         while (isActive) {
-            delay(2_000L)
+            delay(1_000L)
             if (!active || paused.get()) continue
             val gap = System.currentTimeMillis() - lastFrameSeen.get()
             if (gap > WATCHDOG_TIMEOUT_MS) {
@@ -540,12 +568,15 @@ private fun ScannerBody(
 
 private const val DECODE_COOLDOWN_MS = 2_500L
 
-// Stall watchdog: 6 s without a delivered frame = the stream is dead
-// (healthy streams deliver at 15–30 fps; the MIUI stall shows one frozen
+// Stall watchdog: 2.5 s without a delivered frame = the stream is dead
+// (healthy streams deliver 15–30 fps; the MIUI stall shows one frozen
 // frame and nothing further). Retry budget stops a hot rebind loop if the
-// HAL is genuinely wedged — after 3 remounts the UI asks for a manual restart.
-private const val WATCHDOG_TIMEOUT_MS = 6_000L
+// HAL is genuinely wedged — after 3 rapid remounts the UI asks for a manual
+// restart. REBIND_GAP_MS parks on a spinner while the dead graph closes,
+// avoiding the "OPEN + GRAPH_STARTED" overlap race seen in the logs.
+private const val WATCHDOG_TIMEOUT_MS = 2_500L
 private const val MAX_REBINDS = 3
+private const val REBIND_GAP_MS = 300L
 
 private enum class PermissionState { PENDING, GRANTED, DENIED }
 
