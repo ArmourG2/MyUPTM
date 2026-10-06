@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -11,6 +12,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.compose.CameraXViewfinder
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.lifecycle.awaitInstance
 import androidx.camera.viewfinder.core.ImplementationMode
 import androidx.compose.foundation.background
@@ -88,6 +90,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import androidx.compose.ui.platform.LocalLocale
 
 // Sprint 12: the attendance tab IS the scanner. The camera preview is embedded
 // (CameraX + ML Kit) and starts the moment the student opens the tab in QR
@@ -354,7 +357,7 @@ private fun ScannerStage(
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale.getDefault())
+                            java.text.SimpleDateFormat("dd MMM, HH:mm", LocalLocale.current.platformLocale)
                                 .format(java.util.Date(checkIn.verifiedAt)),
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White.copy(alpha = 0.7f)
@@ -467,6 +470,7 @@ private fun CameraScanner(
     }
 }
 
+@OptIn(ExperimentalGetImage::class)
 @Composable
 private fun ScannerBody(
     onCode: (String) -> Unit,
@@ -680,7 +684,7 @@ private fun VerifiedPanel(
             }
             verifiedAt?.let {
                 Text(
-                    java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())
+                    java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", LocalLocale.current.platformLocale)
                         .format(java.util.Date(it)),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
