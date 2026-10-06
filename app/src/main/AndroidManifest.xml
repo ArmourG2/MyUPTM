@@ -5,6 +5,10 @@
     <!-- Sprint 7B: required to post local notifications on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Sprint 11: the zxing scan Activity (attendance QR) needs the camera -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:enableOnBackInvokedCallback="false"
         android:allowBackup="true"

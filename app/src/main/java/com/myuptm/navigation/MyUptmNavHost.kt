@@ -25,6 +25,7 @@ import com.myuptm.navigation.MyUptmRoutes.HOME
 import com.myuptm.navigation.MyUptmRoutes.SIGN_IN
 import com.myuptm.domain.model.toPermissions
 import com.myuptm.ui.screens.AddPostScreen
+import com.myuptm.ui.screens.AdminDashboardScreen
 import com.myuptm.ui.screens.AttendanceRecordScreen
 import com.myuptm.ui.screens.AttendanceScreen
 import com.myuptm.ui.screens.ClassManagementScreen
@@ -90,10 +91,28 @@ fun MyUptmNavHost(
 
     LaunchedEffect(authState) {
         if (authState == AuthState.SUCCESS) {
-            navController.navigate(HOME) {
+            // Sprint 11: admins land on their Dashboard (they have no Home screen).
+            val target = if (authViewModel.userRole.value == com.myuptm.domain.model.UserRole.ADMIN) {
+                MyUptmRoutes.ADMIN_DASHBOARD
+            } else HOME
+            navController.navigate(target) {
                 popUpTo(SIGN_IN) { inclusive = true }
             }
             authViewModel.resetState()
+        }
+    }
+
+    // Sprint 11: cold-start redirect — an already signed-in admin briefly lands on
+    // HOME (the start destination) until the role fetch resolves; swap it out so
+    // Dashboard becomes the back-stack root (back = exit app, not Home).
+    LaunchedEffect(userRecord) {
+        val record = userRecord ?: return@LaunchedEffect
+        if (record.role == com.myuptm.domain.model.UserRole.ADMIN &&
+            navController.currentDestination?.route == HOME
+        ) {
+            navController.navigate(MyUptmRoutes.ADMIN_DASHBOARD) {
+                popUpTo(HOME) { inclusive = true }
+            }
         }
     }
 
@@ -152,10 +171,14 @@ fun MyUptmNavHost(
         }
 
         composable(MyUptmRoutes.ADMIN_DASHBOARD) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Admin Dashboard", style = MaterialTheme.typography.headlineMedium)
-                Text("Welcome, Admin. Placeholder for dashboard stats.", style = MaterialTheme.typography.bodyLarge)
-            }
+            // The activity-scoped inbox (created in MyUptmApp) powers the bell.
+            val inboxViewModel: com.myuptm.viewmodel.InboxViewModel = viewModel(
+                viewModelStoreOwner = LocalContext.current as ViewModelStoreOwner
+            )
+            AdminDashboardScreen(
+                navController = navController,
+                inboxViewModel = inboxViewModel
+            )
         }
         composable(MyUptmRoutes.CLASS_MANAGEMENT) {
             val record = userRecord
@@ -232,7 +255,8 @@ fun MyUptmNavHost(
                 onSignOut = {
                     authViewModel.signOut()
                     navController.navigate(SIGN_IN) {
-                        popUpTo(HOME) { inclusive = true }
+                        // Sprint 11: pop the ENTIRE stack — admins have no HOME on it.
+                        popUpTo(0) { inclusive = true }
                     }
                 }
             )

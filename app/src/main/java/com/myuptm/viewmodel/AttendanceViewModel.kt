@@ -108,7 +108,10 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
                         " — pending your review.",
                     senderName = letter.studentName,
                     staffOnly = true,
-                    postId = letter.id
+                    postId = letter.id,
+                    // Sprint 11 (owner ruling): admins don't teach — letter
+                    // submissions go to the TEACHING STAFF inbox only.
+                    lecturerOnly = true
                 )
             }.onSuccess {
                 _uiState.value = _uiState.value.copy(isSubmitting = false, submitSuccess = true)

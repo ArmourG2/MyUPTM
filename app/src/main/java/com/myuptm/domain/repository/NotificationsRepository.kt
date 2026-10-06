@@ -27,6 +27,9 @@ interface NotificationsRepository {
         importance: String? = null,
         studentOnly: Boolean = false,
         imageUrl: String? = null,
-        postId: String? = null
+        postId: String? = null,
+        // Sprint 11: lecturerOnly docs (absence-letter submissions) never reach
+        // admins — only the teaching staff inbox.
+        lecturerOnly: Boolean = false
     ): Result<Unit>
 }

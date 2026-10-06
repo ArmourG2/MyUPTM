@@ -66,11 +66,14 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
         val email: String?,
         val isStudent: Boolean,
         val isLecturer: Boolean,
+        // Sprint 11: admins are neither students nor lecturers — the letter-submission
+        // docs (lecturerOnly) must never reach them (admins don't teach).
+        val isAdmin: Boolean,
         val myMatric: String?,
         val loaded: Boolean
     )
 
-    private val _identity = MutableStateFlow(InboxIdentity(null, false, false, null, false))
+    private val _identity = MutableStateFlow(InboxIdentity(null, false, false, false, null, false))
 
     // Docs already present on the first snapshot are history — never re-notify for them.
     private val seenIds = mutableSetOf<String>()
@@ -214,7 +217,13 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
         identity: InboxIdentity
     ): List<AppNotification> {
         if (!identity.isStudent) {
-            return list.filter { !isStudentAudience(it) && (identity.isLecturer || it.targetMatric == null) }
+            return list.filter {
+                !isStudentAudience(it) &&
+                    (identity.isLecturer || it.targetMatric == null) &&
+                    // Sprint 11 (owner ruling): letter submissions are TEACHING-STAFF
+                    // news — admins never receive them, current or legacy.
+                    !(identity.isAdmin && it.lecturerOnly)
+            }
         }
         return list.filter {
             !it.staffOnly && (
@@ -233,6 +242,7 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
             email = user?.email,
             isStudent = user?.role == UserRole.STUDENT,
             isLecturer = user?.role == UserRole.LECTURER,
+            isAdmin = user?.role == UserRole.ADMIN,
             myMatric = null,
             loaded = false
         )
@@ -244,6 +254,7 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                     email = user.email,
                     isStudent = user.role == UserRole.STUDENT,
                     isLecturer = user.role == UserRole.LECTURER,
+                    isAdmin = user.role == UserRole.ADMIN,
                     myMatric = matric,
                     loaded = true
                 )

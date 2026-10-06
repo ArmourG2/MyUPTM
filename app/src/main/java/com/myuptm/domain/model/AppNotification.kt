@@ -29,7 +29,10 @@ data class AppNotification(
     val postId: String? = null,
     // Sprint 9 tiering (data-driven): "important" (red, pinned) / "attention"
     // (yellow reminder) / "normal" (blue). Null = legacy docs → derived rules.
-    val importance: String? = null
+    val importance: String? = null,
+    // Sprint 11: absence-letter submissions route to the CLASS OWNER only —
+    // admins don't teach, so they never receive these (owner ruling).
+    val lecturerOnly: Boolean = false
 )
 
 enum class NotificationType {

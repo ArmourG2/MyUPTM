@@ -7,6 +7,10 @@ plugins {
 
 }
 
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) load(f.inputStream())
+}
 android {
     namespace = "com.myuptm"
     compileSdk {
@@ -33,11 +37,21 @@ android {
         buildConfigField("String", "CLOUDINARY_UPLOAD_PRESET", "\"${cloudinaryProps.getProperty("cloudinaryUploadPreset") ?: ""}\"")
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(keystoreProps.getProperty("storeFile") ?: "")
+            storePassword = keystoreProps.getProperty("storePassword")
+            keyAlias = keystoreProps.getProperty("keyAlias")
+            keyPassword = keystoreProps.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
             optimization {
                 enable = false
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -65,6 +79,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.material.icons)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.datastore.preferences)
 
@@ -85,4 +100,8 @@ dependencies {
     implementation(libs.credentials)
     implementation(libs.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    // Sprint 11: QR attendance — generate the session QR (lecturer) + scan it (student).
+    implementation(libs.zxing.core)
+    implementation(libs.zxing.android.embedded)
 }

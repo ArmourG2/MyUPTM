@@ -59,16 +59,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.myuptm.data.repository.MatricMatcher
 import com.myuptm.data.repository.RosterStudent
 import com.myuptm.data.repository.matchesMatric
 import com.myuptm.domain.model.AbsenceLetter
+import com.myuptm.domain.model.AttendanceSession
 import com.myuptm.domain.model.ClassLevel
 import com.myuptm.domain.model.ClassSession
 import com.myuptm.domain.model.LetterStatus
 import com.myuptm.domain.model.TeachingMedium
+import com.myuptm.ui.components.QrCodeImage
+import com.myuptm.viewmodel.AttendanceSessionViewModel
 import com.myuptm.viewmodel.ClassManagementViewModel
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
@@ -103,6 +107,15 @@ fun ClassManagementScreen(
     val letters by viewModel.letters.collectAsState()
     val status by viewModel.status.collectAsState()
     val warningBusy by viewModel.warningBusy.collectAsState()
+
+    // Sprint 11: QR/PIN attendance — one live session per lecturer; the roster
+    // screen hosts the session card (code + QR + countdown + verified count).
+    val sessionViewModel: AttendanceSessionViewModel = viewModel()
+    LaunchedEffect(ownerEmail) { sessionViewModel.bindOwner(ownerEmail) }
+    val activeSession by sessionViewModel.activeSession.collectAsState()
+    val sessionCheckIns by sessionViewModel.sessionCheckIns.collectAsState()
+    val isStartingSession by sessionViewModel.isStarting.collectAsState()
+    val sessionStatus by sessionViewModel.status.collectAsState()
 
     // Sprint 9: bind scoping to the signed-in lecturer ("only MY classes").
     LaunchedEffect(ownerEmail) { viewModel.bindOwner(ownerEmail) }
@@ -175,6 +188,10 @@ fun ClassManagementScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 }
+                sessionStatus?.let { message ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
             }
 
             when {
@@ -193,6 +210,12 @@ fun ClassManagementScreen(
                     students = viewModel.rosterFor(rosterClass!!, letters),
                     letters = letters,
                     subjectName = rosterClass!!.subjectName,
+                    activeSession = activeSession?.takeIf { it.classId == rosterClass!!.id },
+                    otherSessionName = activeSession?.takeIf { it.classId != rosterClass!!.id }?.displayCode,
+                    sessionCheckIns = sessionCheckIns,
+                    isStartingSession = isStartingSession,
+                    onStartAttendance = { sessionViewModel.startSession(rosterClass!!) },
+                    onEndSession = { sessionViewModel.endSession() },
                     onStudentClick = { detailStudentMatric = it.matric },
                     onWarnRed = { warningTargets = it },
                     onEndAttendance = { showEndAttendanceConfirm = true }
@@ -503,6 +526,13 @@ private fun StudentRosterView(
     students: List<RosterStudent>,
     letters: List<AbsenceLetter>,
     subjectName: String,
+    // Sprint 11: live QR/PIN attendance session for THIS class (null = none).
+    activeSession: AttendanceSession?,
+    otherSessionName: String?,
+    sessionCheckIns: List<com.myuptm.domain.model.AttendanceCheckIn>,
+    isStartingSession: Boolean,
+    onStartAttendance: () -> Unit,
+    onEndSession: () -> Unit,
     onStudentClick: (RosterStudent) -> Unit,
     onWarnRed: (List<RosterStudent>) -> Unit,
     onEndAttendance: () -> Unit
@@ -513,6 +543,39 @@ private fun StudentRosterView(
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item(key = "attendance_session") {
+            when {
+                activeSession != null -> AttendanceSessionCard(
+                    session = activeSession,
+                    verifiedCount = sessionCheckIns.size,
+                    onEndSession = onEndSession
+                )
+                otherSessionName != null -> Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Attendance is running for $otherSessionName — end that session first.",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                else -> OutlinedButton(
+                    onClick = onStartAttendance,
+                    enabled = !isStartingSession,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (isStartingSession) "Starting..."
+                        else "Start attendance (QR / PIN) — 5 min window"
+                    )
+                }
+            }
+        }
         item(key = "roster_actions") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -557,6 +620,80 @@ private fun StudentRosterView(
                 pending = pendingLetters,
                 onClick = { onStudentClick(student) }
             )
+        }
+    }
+}
+
+// Sprint 11: the live session card — big shared 6-digit code (QR payload = PIN),
+// scannable QR, live countdown, verified count. Auto-closes the session when the
+// window expires (lazy close; verification also rejects expired sessions).
+@Composable
+private fun AttendanceSessionCard(
+    session: AttendanceSession,
+    verifiedCount: Int,
+    onEndSession: () -> Unit
+) {
+    var remainingMs by remember { mutableStateOf(session.remainingMs()) }
+
+    LaunchedEffect(session.id, session.expiresAt) {
+        while (true) {
+            remainingMs = session.remainingMs()
+            if (remainingMs <= 0L) {
+                onEndSession() // lazy close — flips active=false in Firestore
+                break
+            }
+            delay(1_000)
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Attendance is OPEN — ${session.displayCode}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(10.dp))
+            QrCodeImage(content = session.code, size = 180.dp)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                session.code,
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 6.sp
+            )
+            Text(
+                "PIN = QR — students scan or type this code",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            val minutes = remainingMs / 60_000
+            val seconds = (remainingMs % 60_000) / 1_000
+            Text(
+                if (remainingMs > 0) "Expires in %d:%02d".format(minutes, seconds)
+                else "Expired",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (remainingMs > 30_000) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error
+            )
+            Text(
+                "$verifiedCount student(s) verified",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(onClick = onEndSession) { Text("End session") }
         }
     }
 }

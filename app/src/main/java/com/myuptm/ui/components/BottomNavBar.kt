@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.myuptm.R
@@ -58,15 +59,17 @@ fun getBottomNavItems(userRole: UserRole): List<BottomNavItem> {
             listOf(baseItems[0]) + lecturerTabs + baseItems.subList(1, 3)
         }
         UserRole.ADMIN -> {
-            // Admin loses Timetable, gets Admin Dashboard in the middle
-            val adminTabs = listOf(
+            // Sprint 11 (owner ruling): admins have NO Home — the Home anatomy is
+            // timetable-tied and admins don't teach. The Dashboard IS the first screen.
+            listOf(
                 BottomNavItem(
                     route = MyUptmRoutes.ADMIN_DASHBOARD,
                     label = "Dashboard",
                     icon = ImageVector.vectorResource(id = R.drawable.dashboard_24dp)
-                )
+                ),
+                baseItems[1], // Posts
+                baseItems[2]  // Profile
             )
-            listOf(baseItems[0]) + adminTabs + baseItems.subList(1, 3)
         }
     }
 }
@@ -101,8 +104,10 @@ fun BottomNavBar(
                         if (item.route == MyUptmRoutes.TIMETABLE) {
                             timetableViewModel.requestReset()
                         }
+                        // Sprint 11: pop to the GRAPH start destination (admins have no
+                        // Home tab, so the literal HOME route is no longer on their stack).
                         navController.navigate(item.route) {
-                            popUpTo(MyUptmRoutes.HOME) { saveState = false }
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = false }
                             launchSingleTop = true
                             restoreState = false
                         }
