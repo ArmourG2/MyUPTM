@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -59,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -68,6 +70,7 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -100,27 +103,15 @@ fun AttendanceScreen() {
     val uiState by checkInViewModel.uiState.collectAsState()
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
-        Column(
+        // Sprint 12 (owner): IMMERSIVE — border/inset removed; the stage fills
+        // the whole content area edge-to-edge, title overlays the feed.
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(16.dp))
-            Text("Attendance Verification", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "The code is only valid for 5 minutes after your lecturer opens the session.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            // The stage: live camera (QR mode) / PIN entry / confirmation panel.
             ScannerStage(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
                 isQrMode = isQrMode,
                 onModeChange = {
                     isQrMode = it
@@ -137,47 +128,41 @@ fun AttendanceScreen() {
                     pin = ""
                 },
                 onScanCode = { payload -> checkInViewModel.verify(payload) },
-                onDone = { checkInViewModel.consumeResult() }
+                onDone = { checkInViewModel.consumeResult() },
+                recent = uiState.myCheckIns.take(3),
+                showRecent = uiState.myCheckIns.isNotEmpty() && uiState.verifiedSession == null
             )
 
-            // Recent verifications (proof panel) — newest first, capped at 3.
-            if (uiState.myCheckIns.isNotEmpty() && uiState.verifiedSession == null) {
-                Spacer(Modifier.height(12.dp))
+            // Immersive title: gradient scrim at the top keeps the white text
+            // readable over any feed (bright or dark).
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.75f),
+                            1f to Color.Transparent
+                        )
+                    )
+                    .statusBarsPadding()
+                    .padding(top = 12.dp, bottom = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Text(
-                    "Recent verifications",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    "Attendance Verification",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
                 )
-                Spacer(Modifier.height(4.dp))
-                uiState.myCheckIns.take(3).forEach { checkIn ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            checkIn.displayCode,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale.getDefault())
-                                .format(java.util.Date(checkIn.verifiedAt)),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "The code is only valid for 5 minutes after your lecturer opens the session.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
             }
-            Spacer(Modifier.height(8.dp))
         }
     }
 
@@ -199,7 +184,9 @@ private fun ScannerStage(
     onPinChange: (String) -> Unit,
     onPinSubmit: () -> Unit,
     onScanCode: (String) -> Unit,
-    onDone: () -> Unit
+    onDone: () -> Unit,
+    recent: List<com.myuptm.domain.model.AttendanceCheckIn>,
+    showRecent: Boolean
 ) {
     val context = LocalContext.current
     var permissionState by remember { mutableStateOf(PermissionState.PENDING) }
@@ -220,20 +207,20 @@ private fun ScannerStage(
         if (permissionState == PermissionState.PENDING) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    val stageShape = RoundedCornerShape(24.dp)
+    val hasPermission = permissionState == PermissionState.GRANTED
     Box(
         modifier = modifier
-            .clip(stageShape)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            // Full-bleed: no clip, no inset — only the non-camera states get a
+            // solid backing so panels stay readable without the feed.
+            .background(if (hasPermission && isQrMode && state.verifiedSession == null) Color.Transparent else MaterialTheme.colorScheme.surface)
     ) {
-        val hasPermission = permissionState == PermissionState.GRANTED
         when {
             // Green confirmation — replaces the viewfinder; camera is unbound.
             state.verifiedSession != null -> {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp),
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -250,11 +237,10 @@ private fun ScannerStage(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp),
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Sprint 12: vector drawable (material-icons-extended removed).
                     Icon(
                         ImageVector.vectorResource(com.myuptm.R.drawable.ic_qr_code_scanner),
                         contentDescription = null,
@@ -284,11 +270,10 @@ private fun ScannerStage(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp),
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Sprint 12: vector drawable (material-icons-extended removed).
                     Icon(
                         ImageVector.vectorResource(com.myuptm.R.drawable.ic_no_photography),
                         contentDescription = null,
@@ -327,16 +312,67 @@ private fun ScannerStage(
                 Text(
                     "Point camera at QR code",
                     style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 )
             }
         }
 
-        // Mode toggle rides at the bottom edge of the stage (mock-referenced).
+        // Recent verifications (proof strip) — translucent chip-rows floating
+        // above the mode toggle so they read on any feed.
+        if (showRecent) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 88.dp, start = 20.dp, end = 20.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    "Recent verifications",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+                recent.forEach { checkIn ->
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFFA8E06B),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            checkIn.displayCode,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            java.text.SimpleDateFormat("dd MMM, HH:mm", java.util.Locale.getDefault())
+                                .format(java.util.Date(checkIn.verifiedAt)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Mode toggle rides the bottom edge — wrapped in a DARK pill so the
+        // unselected segment stays readable on a bright feed (the bug from
+        // testing: white segment blended into a white camera frame).
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.62f))
+                .padding(5.dp)
         ) {
             AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
         }
