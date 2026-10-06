@@ -11,6 +11,15 @@ val keystoreProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) load(f.inputStream())
 }
+
+// Sprint 12: local.properties values may be pasted WITH surrounding quotes
+// ("storeFile=/path/...") — Properties keeps the quotes literally, which broke
+// validateSigningRelease (resolved against app/ with embedded "\""). Strip a
+// symmetric wrapping pair from every signing value at load time, so quoting is
+// optional and never fatal.
+private fun Properties.signingValue(key: String): String? =
+    getProperty(key)?.trim()?.trim('"', '\'')
+
 android {
     namespace = "com.myuptm"
     compileSdk {
@@ -45,10 +54,10 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(keystoreProps.getProperty("storeFile") ?: "")
-            storePassword = keystoreProps.getProperty("storePassword")
-            keyAlias = keystoreProps.getProperty("keyAlias")
-            keyPassword = keystoreProps.getProperty("keyPassword")
+            storeFile = file(keystoreProps.signingValue("storeFile") ?: "")
+            storePassword = keystoreProps.signingValue("storePassword")
+            keyAlias = keystoreProps.signingValue("keyAlias")
+            keyPassword = keystoreProps.signingValue("keyPassword")
         }
     }
 
