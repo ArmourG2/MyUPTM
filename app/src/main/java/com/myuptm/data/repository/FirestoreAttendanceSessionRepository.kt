@@ -129,6 +129,43 @@ class FirestoreAttendanceSessionRepository(
         return task.awaitResult().map { }
     }
 
+    // Sprint 13 (absentee-notice join): equality-only on lecturerEmail + classId
+    // (automatic single-field index merge — still NO composite index needed).
+    override suspend fun sessionsForLecturerAndClass(
+        lecturerEmail: String,
+        classId: String
+    ): Result<List<AttendanceSession>> {
+        return suspendCancellableCoroutine { continuation ->
+            db.collection(SESSIONS)
+                .whereEqualTo("lecturerEmail", lecturerEmail)
+                .whereEqualTo("classId", classId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    val sessions = snapshot.documents.mapNotNull { it.toSession() }
+                    if (continuation.isActive) continuation.resume(Result.success(sessions))
+                }
+                .addOnFailureListener { e ->
+                    if (continuation.isActive) continuation.resume(Result.failure(e))
+                }
+        }
+    }
+
+    // Sprint 13: all check-ins of one session (one-shot read).
+    override suspend fun checkInsForSession(sessionId: String): Result<List<AttendanceCheckIn>> {
+        return suspendCancellableCoroutine { continuation ->
+            db.collection(CHECKINS)
+                .whereEqualTo("sessionId", sessionId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    val rows = snapshot.documents.mapNotNull { it.toCheckIn() }
+                    if (continuation.isActive) continuation.resume(Result.success(rows))
+                }
+                .addOnFailureListener { e ->
+                    if (continuation.isActive) continuation.resume(Result.failure(e))
+                }
+        }
+    }
+
     private fun AttendanceSession.toFirestoreMap(): Map<String, Any?> = mapOf(
         "code" to code,
         "classId" to classId,

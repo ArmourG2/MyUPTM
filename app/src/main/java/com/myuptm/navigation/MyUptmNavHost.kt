@@ -131,7 +131,11 @@ fun MyUptmNavHost(
                     }
                 },
                 errorMessage = errorMessage, // Pass this to your SignInScreen to show errors
-                isLoading = authState == AuthState.LOADING // Pass this to show a spinner
+                isLoading = authState == AuthState.LOADING, // Pass this to show a spinner
+                // Sprint 13: pending-account approval park
+                isWaitingApproval = authState == AuthState.WAITING_APPROVAL,
+                waitingEmail = authViewModel.pendingEmail.value,
+                onCancelWait = { authViewModel.signOut() }
             )
         }
         composable(HOME) { HomeScreen(navController = navController, user = userRecord) }

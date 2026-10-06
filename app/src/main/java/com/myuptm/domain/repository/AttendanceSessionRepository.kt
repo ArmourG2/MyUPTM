@@ -32,4 +32,13 @@ interface AttendanceSessionRepository {
     suspend fun hasCheckedIn(sessionId: String, matric: String): Result<Boolean>
 
     suspend fun addCheckIn(checkIn: AttendanceCheckIn): Result<Unit>
+
+    // Sprint 13 (P0 backlog): one-shot, ALL sessions owned by [lecturerEmail]
+    // for [classId] (equality-only; the caller picks the latest + filters "today"
+    // client-side). Backs the absentee-notice join: verified students never get
+    // a miss notice.
+    suspend fun sessionsForLecturerAndClass(lecturerEmail: String, classId: String): Result<List<AttendanceSession>>
+
+    // Sprint 13: one-shot, ALL check-ins recorded against one session.
+    suspend fun checkInsForSession(sessionId: String): Result<List<AttendanceCheckIn>>
 }

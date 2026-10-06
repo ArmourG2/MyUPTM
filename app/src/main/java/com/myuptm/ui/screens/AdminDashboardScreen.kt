@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
@@ -23,11 +24,18 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,6 +46,7 @@ import com.myuptm.R
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.myuptm.domain.model.Post
+import com.myuptm.domain.model.UserRole
 import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.AnnouncementRow
 import com.myuptm.viewmodel.AdminDashboardViewModel
@@ -56,6 +65,11 @@ fun AdminDashboardScreen(
     val dashboardViewModel: AdminDashboardViewModel = viewModel()
     val state by dashboardViewModel.state.collectAsState()
     val posts by dashboardViewModel.posts.collectAsState()
+    val approvalBusy by dashboardViewModel.approvalBusy.collectAsState()
+    val status by dashboardViewModel.status.collectAsState()
+
+    // Sprint 13: role-assignment dialog state (the account being reassigned).
+    var pendingDialog by remember { mutableStateOf<AdminDashboardViewModel.PendingAccount?>(null) }
 
     // Same bell behaviour the student/lecturer Home screen has — the inbox is
     // activity-scoped, so the unread dot + deep-link routing stay consistent.
@@ -151,19 +165,27 @@ fun AdminDashboardScreen(
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Text(
-                                account.email,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                account.role?.replaceFirstChar { it.uppercase() }
-                                    ?: "Role not yet assigned",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    account.email,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    account.role?.replaceFirstChar { it.uppercase() }
+                                        ?: "Role not yet assigned",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { pendingDialog = account },
+                                enabled = !approvalBusy
+                            ) {
+                                Text(if (account.role == null) "Assign role" else "Reassign")
+                            }
                         }
                     }
                 }
@@ -194,6 +216,85 @@ fun AdminDashboardScreen(
                 }
             }
         }
+    }
+
+    // Sprint 13: role-assignment dialog — pick a role (+ optional admin
+    // privilege) and write it; every client watching that doc resumes itself.
+    pendingDialog?.let { dialogAccount ->
+        var chosenRole by remember(dialogAccount.uid) {
+            mutableStateOf(UserRole.STUDENT)
+        }
+        var chosenAdminPrivilege by remember(dialogAccount.uid) { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { pendingDialog = null },
+            title = {
+                Text("Assign role", style = MaterialTheme.typography.titleLarge)
+            },
+            text = {
+                Column {
+                    Text(
+                        dialogAccount.email,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    RoleRadioRow("Student", UserRole.STUDENT, chosenRole) { chosenRole = it }
+                    RoleRadioRow("Lecturer", UserRole.LECTURER, chosenRole) { chosenRole = it }
+                    RoleRadioRow("Admin", UserRole.ADMIN, chosenRole) { chosenRole = it }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(checked = chosenAdminPrivilege, onCheckedChange = { chosenAdminPrivilege = it })
+                        Text(
+                            "Admin privilege (notify / manual notify composer)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    status?.let { line ->
+                        Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !approvalBusy,
+                    onClick = {
+                        dashboardViewModel.approveAccount(
+                            uid = dialogAccount.uid,
+                            role = chosenRole,
+                            adminPrivilege = chosenAdminPrivilege or (chosenRole == UserRole.ADMIN)
+                        )
+                        pendingDialog = null
+                    }
+                ) { Text(if (approvalBusy) "Approving..." else "Approve") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDialog = null }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun RoleRadioRow(
+    label: String,
+    role: UserRole,
+    chosenRole: UserRole,
+    onChosen: (UserRole) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        RadioButton(
+            selected = chosenRole == role,
+            onClick = { onChosen(role) }
+        )
+        Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

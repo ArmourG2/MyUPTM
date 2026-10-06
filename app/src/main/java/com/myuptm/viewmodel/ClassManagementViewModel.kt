@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.myuptm.data.repository.FirestoreClassRepository
 import com.myuptm.data.repository.FirestoreNotificationsRepository
 import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
+import com.myuptm.data.repository.FirestoreAttendanceSessionRepository
 import com.myuptm.data.repository.FirestoreProfileRepository
 import com.myuptm.data.repository.MockAttendanceRoster
 import com.myuptm.data.repository.matchesMatric
@@ -42,6 +43,8 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     private val lettersRepository: AbsenceLetterRepository = FirestoreAbsenceLetterRepository()
     private val profileRepository: FirestoreProfileRepository = FirestoreProfileRepository()
     private val cloudinaryRepository = RealCloudinaryRepository(application)
+    // Sprint 13: attendance-session reads for the absentee-notice join.
+    private val sessionRepository = FirestoreAttendanceSessionRepository()
 
     // The signed-in lecturer's email; drives "only MY classes" scoping.
     private var ownerEmail: String? = null
@@ -353,10 +356,12 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         )
     }
 
-    // Sprint 9 (Option A): "Close attendance" — the lecturer closes a slot and every
-    // student of the section gets a YELLOW missed-class notice (roster-wide; only
-    // real accounts actually receive theirs). Submitting a letter excuse = the red
-    // / yellow clearing path already wired for the demo.
+    // Sprint 9 (Option A): "End class & notify absentees" — students who did not
+    // verify attendance receive a YELLOW missed-class notice. Submitting a letter
+    // excuse = the red/yellow clearing path already wired for the demo.
+    // Sprint 13 (P0 backlog FIX): the notice list is joined against
+    // attendance_checkins — students who VERIFIED (scan or PIN) during today's
+    // sessions for this class are SKIPPED; only true absentees are notified.
     fun closeAttendance(classSession: ClassSession) {
         viewModelScope.launch {
             runCatching {
@@ -365,7 +370,32 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                     classSession.subjectName,
                     approvedLetters = 0
                 )
-                roster.forEach { student ->
+                // Collect every matric that verified attendance TODAY for this
+                // class (scan or PIN) from the lecturer's session history.
+                // All queries equality-only; "today" + "latest session" are
+                // decided client-side to avoid composite indexes.
+                val verifiedMatrics = mutableListOf<String>()
+                val dayStart = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                ownerEmail?.let { email ->
+                    sessionRepository.sessionsForLecturerAndClass(
+                        email, classSession.id
+                    ).getOrDefault(emptyList())
+                        .filter { it.startedAt >= dayStart }
+                        .forEach { session ->
+                            sessionRepository.checkInsForSession(session.id)
+                                .getOrDefault(emptyList())
+                                .forEach { verifiedMatrics.add(it.matric) }
+                        }
+                }
+                val absent = roster.filter { student ->
+                    verifiedMatrics.none { verified -> verified.matchesMatric(student.matric) }
+                }
+                absent.forEach { student ->
                     notificationsRepository.sendNotification(
                         NotificationType.ANNOUNCEMENT,
                         title = "You missed ${classSession.displayCode}",
@@ -378,9 +408,10 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                         studentOnly = true
                     ).getOrThrow()
                 }
-                roster.size
-            }.onSuccess { count ->
-                _status.value = "Session ended — $count missed-class notice(s) sent to students who did not verify"
+                absent.size to (roster.size - absent.size)
+            }.onSuccess { (notified, skipped) ->
+                _status.value = "Session ended — $notified missed-class notice(s) sent; " +
+                    "$skipped verified student(s) skipped"
             }.onFailure { e ->
                 _status.value = e.message ?: "Could not end the attendance session"
             }

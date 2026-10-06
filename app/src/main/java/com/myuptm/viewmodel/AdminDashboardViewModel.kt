@@ -4,10 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.myuptm.data.repository.FirestoreClassRepository
 import com.myuptm.data.repository.FirestorePostsRepository
 import com.myuptm.domain.model.ClassSession
 import com.myuptm.domain.model.Post
+import com.myuptm.domain.model.UserRole
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +51,12 @@ class AdminDashboardViewModel(application: Application) : AndroidViewModel(appli
         .observePosts()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    // One-line operation feedback (Sprint 13: approval writes) + busy state.
+    private val _approvalBusy = MutableStateFlow(false)
+    val approvalBusy: StateFlow<Boolean> = _approvalBusy.asStateFlow()
+    private val _status = MutableStateFlow<String?>(null)
+    val status: StateFlow<String?> = _status.asStateFlow()
+
     // Classes count — reuses the global repository (auto-seeds on first read, too).
     val classes: StateFlow<List<ClassSession>> = FirestoreClassRepository()
         .observeClasses()
@@ -87,6 +95,31 @@ class AdminDashboardViewModel(application: Application) : AndroidViewModel(appli
                 isLoadingUsers = false
             )
         }
+    }
+
+    // Sprint 13 (pending-account approval): assigns the role + flips approved.
+    // The client (any device) watching its own doc resumes automatically — the
+    // admin's only job is this write.
+    fun approveAccount(uid: String, role: UserRole, adminPrivilege: Boolean) {
+        _approvalBusy.value = true
+        db.collection(USERS).document(uid)
+            .set(
+                mapOf(
+                    "role" to role.name.lowercase(),
+                    "approved" to true,
+                    "isAdminPrivilege" to adminPrivilege,
+                    "approvedAt" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            )
+            .addOnCompleteListener { task ->
+                _approvalBusy.value = false
+                _status.value = if (task.isSuccessful) {
+                    "Account approved — the client will pick it up automatically."
+                } else {
+                    task.exception?.message ?: "Could not approve the account"
+                }
+            }
     }
 
     companion object {

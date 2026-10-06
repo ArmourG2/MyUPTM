@@ -5,25 +5,35 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
+import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.compose.CameraXViewfinder
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.lifecycle.awaitInstance
 import androidx.camera.viewfinder.core.ImplementationMode
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -44,8 +54,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,15 +71,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -94,7 +102,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import androidx.compose.ui.platform.LocalLocale
+import kotlin.time.Duration.Companion.milliseconds
 
 // Sprint 13: the attendance tab IS the scanner. The camera preview is embedded
 // (CameraX + ML Kit) and starts the moment the student opens the tab in QR
@@ -108,11 +116,16 @@ import androidx.compose.ui.platform.LocalLocale
 // non-camera state (PIN entry, permission panel, verified panel) renders a
 // themed header on the plain surface instead, which removes the "floating
 // shadow" effect seen in light mode.
+//
+// Sprint 13 mode-transition polish (owner request): swapping QR ↔ PIN used to
+// hard-swap the stage; now the content area is one AnimatedContent whose
+// transition is a wipe: the outgoing stage slides up and fades while the
+// incoming stage slides in from the bottom and fades in. The header + toggle
+// sit OUTSIDE that animation, so they never jump.
 @Composable
 fun AttendanceScreen() {
     var isQrMode by remember { mutableStateOf(true) }
     var pin by remember { mutableStateOf("") }
-    val snackbarHostState = remember { SnackbarHostState() }
     val checkInViewModel: AttendanceCheckInViewModel = viewModel()
     val uiState by checkInViewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -139,26 +152,46 @@ fun AttendanceScreen() {
     val feedLive =
         permissionState == PermissionState.GRANTED && isQrMode && uiState.verifiedSession == null
 
+    // Animated header: the scrim fades with the feed's presence and the title
+    // colours crossfade white↔themed in step with the stage wipe below.
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (feedLive) 1f else 0f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "scrimAlpha"
+    )
+    val headerTitleColor by animateColorAsState(
+        targetValue = if (feedLive) Color.White else MaterialTheme.colorScheme.onSurface,
+        animationSpec = tween(280),
+        label = "headerTitle"
+    )
+    val headerSubtitleColor by animateColorAsState(
+        targetValue = if (feedLive) Color.White.copy(alpha = 0.8f)
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(280),
+        label = "headerSubtitle"
+    )
+
     // Over the feed the status bar shows WHITE icons; otherwise the theme's
     // own choice applies (dark icons on light surface, light on dark). The
-    // theme's value is snapshotted and restored when the feed hides or this
-    // screen leaves composition.
+    // flip is keyed to the scrim's fade midpoint so it stays in sync with the
+    // animation instead of snapping. The theme's value is snapshotted and
+    // restored when the feed hides or this screen leaves composition.
     val view = LocalView.current
-    DisposableEffect(feedLive) {
+    val iconsOverFeed = scrimAlpha > 0.5f
+    DisposableEffect(iconsOverFeed) {
         val window = (view.context as android.app.Activity).window
         val controller = androidx.core.view.WindowCompat.getInsetsController(window, view)
         val themeDefault = controller.isAppearanceLightStatusBars
-        controller.isAppearanceLightStatusBars = if (feedLive) true else themeDefault
+        // isAppearanceLightStatusBars = true draws DARK icons — over the live
+        // feed we force it false (white icons), restore the theme elsewhere.
+        controller.isAppearanceLightStatusBars = if (iconsOverFeed) false else themeDefault
         onDispose { controller.isAppearanceLightStatusBars = themeDefault }
     }
 
     // Zero insets on this scaffold: the content area already accounts for the
     // status bar, and the live feed must reach under it edge-to-edge. Overlays
     // that must clear system UI apply their own statusBarsPadding.
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { _ ->
+    Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -178,10 +211,10 @@ fun AttendanceScreen() {
                     if (value.length <= 6 && value.all { it.isDigit() }) pin = value
                 },
                 onPinSubmit = {
-                    checkInViewModel.verify(pin)
+                    checkInViewModel.verify(pin, autoRetry = false)
                     pin = ""
                 },
-                onScanCode = { payload -> checkInViewModel.verify(payload) },
+                onScanCode = { payload -> checkInViewModel.verify(payload, autoRetry = true) },
                 onDone = { checkInViewModel.consumeResult() },
                 recent = uiState.myCheckIns.take(3),
                 showRecent = uiState.myCheckIns.isNotEmpty() && uiState.verifiedSession == null
@@ -190,16 +223,15 @@ fun AttendanceScreen() {
             // Immersive header. The dark gradient + white text render only when
             // the camera feed is live underneath; otherwise the header matches
             // the theme, so light mode never shows a "shadow" with no camera.
+            // Both fade with [scrimAlpha] so the mode swap never pops.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .then(
-                        if (feedLive) Modifier.background(
-                            Brush.verticalGradient(
-                                0f to Color.Black.copy(alpha = 0.75f),
-                                1f to Color.Transparent
-                            )
-                        ) else Modifier
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.75f * scrimAlpha),
+                            1f to Color.Transparent
+                        )
                     )
                     .statusBarsPadding()
                     .padding(top = 12.dp, bottom = 18.dp),
@@ -209,14 +241,13 @@ fun AttendanceScreen() {
                     "Attendance Verification",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (feedLive) Color.White else MaterialTheme.colorScheme.onSurface
+                    color = headerTitleColor
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
                     "The code is only valid for 5 minutes after your lecturer opens the session.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (feedLive) Color.White.copy(alpha = 0.8f)
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = headerSubtitleColor,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
@@ -224,11 +255,15 @@ fun AttendanceScreen() {
         }
     }
 
-    // Errors (expired code, unknown code, network) surface as a snackbar so the
-    // camera keeps running underneath — the student can scan the next code
-    // without re-entering anything.
-    LaunchedEffect(uiState.error) {
-        uiState.error?.let { snackbarHostState.showSnackbar(it) }
+    // Scan feedback lives ON THE STAGE now (instant [scanNotice] line) — no
+    // snackbar: popups were both too much (spam loop) and too slow (only
+    // appearing after the Firestore round trip). The notice auto-clears a
+    // few seconds after its latest update; a newer scan restarts the timer.
+    LaunchedEffect(uiState.scanNotice, uiState.scanNoticeAt) {
+        if (uiState.scanNotice != null) {
+            delay(6_000L)
+            checkInViewModel.consumeNotice()
+        }
     }
 }
 
@@ -253,134 +288,181 @@ private fun ScannerStage(
     // pills, scrim, white text) belongs ONLY to this state; anything else is a
     // themed panel on the surface colour.
     val overFeed = hasPermission && isQrMode && state.verifiedSession == null
+    // Which body is on stage — drives the animated swap below (QR↔PIN wipe,
+    // the rest crossfade).
+    val stage = when {
+        state.verifiedSession != null -> Stage.VERIFIED
+        !isQrMode -> Stage.PIN
+        permissionState == PermissionState.DENIED -> Stage.DENIED
+        hasPermission -> Stage.SCANNER
+        else -> Stage.PENDING
+    }
     Box(
         modifier = modifier
             .background(if (overFeed) Color.Transparent else MaterialTheme.colorScheme.surface)
     ) {
-        when {
-            // Green confirmation — replaces the viewfinder; camera is unbound.
-            state.verifiedSession != null -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    VerifiedPanel(
-                        displayCode = state.verifiedSession.displayCode,
-                        verifiedAt = state.verifiedAt,
-                        onDone = onDone
-                    )
+        AnimatedContent(
+            targetState = stage,
+            transitionSpec = {
+                when {
+                    // Owner's signature move: QR slides UP and out while the
+                    // PIN panel rises from the bottom.
+                    targetState == Stage.PIN && initialState == Stage.SCANNER ->
+                        slideInVertically(tween(300, easing = FastOutSlowInEasing)) { full -> full } togetherWith
+                            slideOutVertically(tween(300, easing = FastOutSlowInEasing)) { full -> -full }
+                    // Mirror on the way back: PIN sinks away, QR returns from
+                    // the top.
+                    targetState == Stage.SCANNER && initialState == Stage.PIN ->
+                        slideInVertically(tween(300, easing = FastOutSlowInEasing)) { full -> -full } togetherWith
+                            slideOutVertically(tween(300, easing = FastOutSlowInEasing)) { full -> full }
+                    else -> fadeIn(tween(220)) togetherWith fadeOut(tween(220))
                 }
-            }
-
-            // PIN mode — the camera is NOT bound (no indicator light, no drain).
-            !isQrMode -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        ImageVector.vectorResource(com.myuptm.R.drawable.ic_qr_code_scanner),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    PinEntry(
-                        pin = pin,
-                        onPinChange = onPinChange,
-                        isVerifying = state.isVerifying,
-                        onSubmit = onPinSubmit
-                    )
-                }
-            }
-
-            // QR mode + permission granted — the LIVE scanner (stays mounted
-            // through the verifying window; [paused] gates frame analysis).
-            hasPermission -> CameraScanner(
-                onCode = onScanCode,
-                active = !state.isVerifying,
-                modifier = Modifier.fillMaxSize()
-            )
-
-            // Permission denied — retry panel; PIN stays one tap away.
-            permissionState == PermissionState.DENIED -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        ImageVector.vectorResource(com.myuptm.R.drawable.ic_no_photography),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("Camera access is needed to scan the QR", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Or switch to the PIN below and type the code.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = onRetryPermission) {
-                        Text("Retry camera")
+            },
+            label = "attendanceStage"
+        ) { target ->
+            when (target) {
+                Stage.VERIFIED -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        VerifiedPanel(
+                            displayCode = state.verifiedSession?.displayCode.orEmpty(),
+                            verifiedAt = state.verifiedAt,
+                            onDone = onDone
+                        )
                     }
                 }
-            }
 
-            // Waiting on the permission dialog.
-            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
-
-        // Viewfinder furniture — brackets + caption, only while scanning camera-side.
-        if (overFeed) {
-            Column(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                CornerBracketFrame(size = 240.dp, modifier = Modifier.size(240.dp))
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Point camera at QR code",
-                    // Soft dark shadow keeps the caption readable on blown-out
-                    // bright frames (light mode over white walls/lights).
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        shadow = Shadow(
-                            color = Color.Black.copy(alpha = 0.6f),
-                            offset = Offset(0f, 1f),
-                            blurRadius = 6f
+                // PIN mode — the camera is NOT bound (no indicator light, no drain).
+                Stage.PIN -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            ImageVector.vectorResource(com.myuptm.R.drawable.ic_qr_code_scanner),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(56.dp)
                         )
-                    ),
-                    color = Color.White
-                )
+                        // Same instant scan status as the scanner caption.
+                        state.scanNotice?.let { notice ->
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                notice,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        PinEntry(
+                            pin = pin,
+                            onPinChange = onPinChange,
+                            isVerifying = state.isVerifying,
+                            onSubmit = onPinSubmit
+                        )
+                    }
+                }
+
+                // QR mode + permission granted — the LIVE scanner (stays mounted
+                // through the verifying window; [paused] gates frame analysis).
+                Stage.SCANNER -> Box(Modifier.fillMaxSize()) {
+                    CameraScanner(
+                        onCode = onScanCode,
+                        active = !state.isVerifying,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // Viewfinder furniture lives INSIDE the scanner body so
+                    // brackets + caption slide away together with the feed.
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CornerBracketFrame(size = 240.dp, modifier = Modifier.size(240.dp))
+                        Spacer(Modifier.height(12.dp))
+                        // The caption doubles as the scan-status line: the
+                        // moment a decode lands it swaps to the latest result
+                        // (checking / cached outcome) in a distinct tint —
+                        // instant, non-modal scan acknowledgment.
+                        val notice = state.scanNotice
+                        Text(
+                            notice ?: "Point camera at QR code",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                shadow = Shadow(
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    offset = Offset(0f, 1f),
+                                    blurRadius = 6f
+                                )
+                            ),
+                            color = if (notice != null) Color(0xFFFFD54F) else Color.White
+                        )
+                    }
+                }
+
+                // Permission denied — retry panel; PIN stays one tap away.
+                Stage.DENIED -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            ImageVector.vectorResource(com.myuptm.R.drawable.ic_no_photography),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text("Camera access is needed to scan the QR", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Or switch to the PIN below and type the code.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = onRetryPermission) {
+                            Text("Retry camera")
+                        }
+                    }
+                }
+
+                // Waiting on the permission dialog.
+                Stage.PENDING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
         }
+
 
         // Recent verifications (proof strip) — floating chip rows. Dark
-        // translucent over the feed; themed card everywhere else.
+        // translucent over the feed; themed card everywhere else. The container
+        // colour animates so the mode swap never pops.
         if (showRecent) {
+            val stripColor by animateColorAsState(
+                targetValue = if (overFeed) Color.Black.copy(alpha = 0.62f)
+                else MaterialTheme.colorScheme.surfaceContainer,
+                animationSpec = tween(220),
+                label = "stripColor"
+            )
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 88.dp, start = 20.dp, end = 20.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(
-                        if (overFeed) Color.Black.copy(alpha = 0.62f)
-                        else MaterialTheme.colorScheme.surfaceContainer
-                    )
+                    .background(stripColor)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Text(
@@ -422,34 +504,23 @@ private fun ScannerStage(
             }
         }
 
-        // Mode toggle rides the bottom edge. The DARK pill wrapper exists to
-        // keep the unselected segment readable over a bright camera frame, so
-        // it is applied only over the feed; elsewhere the bare segmented
-        // control sits on its own surface colour. Both get the nav-bar inset.
-        if (state.verifiedSession == null) {
-            if (overFeed) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.Black.copy(alpha = 0.62f))
-                        .padding(5.dp)
-                ) {
-                    AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        // The app-level bottom nav already consumes the
-                        // navigation-bar inset, so no extra bar padding here —
-                        // just a small breathing gap.
-                        .padding(bottom = 8.dp)
-                ) {
-                    AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
-                }
-            }
+        // Mode toggle rides the bottom edge. It uses SOLID theme-inverse
+        // chrome (see AttendanceModeToggle) so it looks identical in every
+        // state — over the feed, in PIN mode, light or dark. AnimatedVisibility
+        // slides it away while the verified panel is up.
+        AnimatedVisibility(
+            visible = state.verifiedSession == null,
+            enter = fadeIn(tween(200)) +
+                slideInVertically(tween(200, easing = FastOutSlowInEasing)) { full -> full / 2 },
+            exit = fadeOut(tween(200)) +
+                slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { full -> full / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                // The app-level bottom nav already consumes the navigation-bar
+                // inset, so no extra bar padding here — just a breathing gap.
+                .padding(bottom = 8.dp)
+        ) {
+            AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
         }
     }
 }
@@ -491,7 +562,7 @@ private fun CameraScanner(
     // clear the retry counter so a LATER stall auto-recovers again.
     LaunchedEffect(rebindKey, rebinding) {
         if (!rebinding) {
-            delay(30_000L)
+            delay(30_000L.milliseconds)
             stallCount = 0
         }
     }
@@ -511,7 +582,7 @@ private fun CameraScanner(
                         // Unmount first (spinner), give CameraX a beat to fully
                         // close the dead graph, THEN mount fresh — no overlap.
                         rebinding = true
-                        delay(REBIND_GAP_MS)
+                        delay(REBIND_GAP_MS.milliseconds)
                         rebindKey++
                         rebinding = false
                     }
@@ -582,7 +653,7 @@ private fun ScannerBody(
     // report to the parent for a full remount.
     LaunchedEffect(active, generation) {
         while (isActive) {
-            delay(1_000L)
+            delay(1_000L.milliseconds)
             if (!active || paused.get()) continue
             val gap = System.currentTimeMillis() - lastFrameSeen.get()
             if (gap > WATCHDOG_TIMEOUT_MS) {
@@ -635,8 +706,10 @@ private fun ScannerBody(
                             val payload = codes.firstOrNull()?.rawValue
                             lastDecode.set(System.currentTimeMillis())
                             if (!payload.isNullOrBlank()) {
-                                paused.set(true) // one scan = one check-in
-                                lastDecode.set(0L) // clear the cooldown gate
+                                // Fire every decode — the 2.5 s cooldown above
+                                // spaces attempts. The ViewModel rate-limits
+                                // repeat codes AND answers instantly, so the
+                                // user always sees that the scan registered.
                                 executor.execute { onCode(payload) }
                                 return@setAnalyzer
                             }
@@ -680,6 +753,11 @@ private fun ScannerBody(
 
 private const val DECODE_COOLDOWN_MS = 2_500L
 
+// A payload that just FAILED verification is silently skipped for this long
+// when the camera keeps seeing it — stops the re-verify loop (Firestore
+// spam + snackbar flashing) while a stale QR sits in front of the lens.
+private const val SAME_PAYLOAD_RETRY_MS = 15_000L
+
 // Stall watchdog: 2.5 s without a delivered frame = the stream is dead
 // (healthy streams deliver 15–30 fps; the MIUI stall shows one frozen
 // frame and nothing further). Retry budget stops a hot rebind loop if the
@@ -691,6 +769,9 @@ private const val MAX_REBINDS = 3
 private const val REBIND_GAP_MS = 300L
 
 private enum class PermissionState { PENDING, GRANTED, DENIED }
+
+// The scanner body states — AnimatedContent's key for the mode-change wipe.
+private enum class Stage { PENDING, SCANNER, PIN, VERIFIED, DENIED }
 
 // Corner-bracket viewfinder, mock-referenced: four L strokes on a transparent
 // canvas, over a soft dark under-stroke so brackets stay visible even against
@@ -707,8 +788,11 @@ private fun CornerBracketFrame(size: androidx.compose.ui.unit.Dp, modifier: Modi
 
         fun armPoints(x1: Float, y1: Float, x2: Float, y2: Float) {
             // Dark hairline under a white main stroke = works on any feed.
-            drawLine(shadow, androidx.compose.ui.geometry.Offset(x1, y1), androidx.compose.ui.geometry.Offset(x2, y2), stroke + 4f, StrokeCap.Round)
-            drawLine(accent, androidx.compose.ui.geometry.Offset(x1, y1), androidx.compose.ui.geometry.Offset(x2, y2), stroke, StrokeCap.Round)
+            drawLine(shadow,
+                Offset(x1, y1),
+                Offset(x2, y2), stroke + 4f, StrokeCap.Round)
+            drawLine(accent, Offset(x1, y1),
+                Offset(x2, y2), stroke, StrokeCap.Round)
         }
 
         // Top-left: horizontal arm + vertical arm
@@ -779,16 +863,28 @@ private fun VerifiedPanel(
 
 @Composable
 private fun AttendanceModeToggle(isQrMode: Boolean, onModeChange: (Boolean) -> Unit) {
+    // SOLID chrome, identical in every state: inactive segments take
+    // inverseSurface (dark grey in light theme, light grey in dark) so the
+    // control reads clearly on a light surface, a dark room, or a blown-out
+    // bright feed — no translucent wrapper, no per-state styling.
+    val toggleColors = SegmentedButtonDefaults.colors(
+        activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+        activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        inactiveContainerColor = MaterialTheme.colorScheme.inverseSurface,
+        inactiveContentColor = MaterialTheme.colorScheme.inverseOnSurface
+    )
     SingleChoiceSegmentedButtonRow(modifier = Modifier.width(200.dp)) {
         SegmentedButton(
             selected = isQrMode,
             onClick = { onModeChange(true) },
-            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            colors = toggleColors
         ) { Text("QR") }
         SegmentedButton(
             selected = !isQrMode,
             onClick = { onModeChange(false) },
-            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            colors = toggleColors
         ) { Text("PIN") }
     }
 }
