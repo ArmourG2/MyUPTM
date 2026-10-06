@@ -17,6 +17,7 @@ object MyUptmRoutes {
     const val NOTIF_DETAIL = "notif_detail/{notifId}"
     const val ENROLLED_SECTIONS = "enrolled_sections"
     const val WARNING_LETTERS = "warning_letters"
+    const val MISSED_CLASSES = "missed_classes"
     const val ATTENDANCE_RECORD = "attendance_record/{classId}/{matric}"
 
     // Helper: substitutes the real id into the pattern

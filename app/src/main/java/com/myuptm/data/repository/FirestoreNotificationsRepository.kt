@@ -48,7 +48,8 @@ class FirestoreNotificationsRepository(
         staffOnly: Boolean,
         importance: String?,
         studentOnly: Boolean,
-        imageUrl: String?
+        imageUrl: String?,
+        postId: String?
     ): Result<Unit> {
         val task = db.collection(COLLECTION).add(
             mapOf(
@@ -63,7 +64,8 @@ class FirestoreNotificationsRepository(
                 "staffOnly" to staffOnly,
                 "importance" to importance,
                 "studentOnly" to studentOnly,
-                "imageUrl" to imageUrl
+                "imageUrl" to imageUrl,
+                "postId" to postId
             )
         )
         return task.awaitResult().map { }
@@ -86,7 +88,8 @@ class FirestoreNotificationsRepository(
             staffOnly = getBoolean("staffOnly") ?: false,
             importance = getString("importance"),
             studentOnly = getBoolean("studentOnly") ?: false,
-            imageUrl = getString("imageUrl")
+            imageUrl = getString("imageUrl"),
+            postId = getString("postId")
         )
     }
 

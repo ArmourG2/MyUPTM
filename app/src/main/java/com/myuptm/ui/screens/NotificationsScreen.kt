@@ -69,6 +69,7 @@ import com.myuptm.domain.model.NotificationType
 import com.myuptm.viewmodel.InboxViewModel
 import com.myuptm.viewmodel.NotificationTier
 import com.myuptm.viewmodel.NotificationsViewModel
+import com.myuptm.viewmodel.PostsViewModel
 import com.myuptm.viewmodel.notificationTier
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -91,6 +92,7 @@ fun NotificationsScreen(
     user: AppUser?,
     onBackClick: () -> Unit,
     onOpenDetail: (String) -> Unit,
+    onOpenPost: (String) -> Unit,
     viewModel: NotificationsViewModel = viewModel()
 ) {
     LaunchedEffect(user) { viewModel.bindUser(user) }
@@ -101,6 +103,30 @@ fun NotificationsScreen(
     )
     val inbox by inboxViewModel.inbox.collectAsState()
     val notifications = inbox.list
+
+    // Sprint 9: posts feed — resolves LEGACY post notifications (created before
+    // the postId field existed) by matching the notification title.
+    val postsViewModel: PostsViewModel = viewModel()
+    val posts by postsViewModel.posts.collectAsState()
+
+    // Sprint 9: POST notifications are POINTERS — tapping one jumps straight to
+    // the post detail. IMPORTANT posts stay pinned in the inbox (never consumed
+    // by a tap); attention/normal are consumed. Legacy docs (postId == null) are
+    // resolved by title match against the posts feed. Letter-submission docs and
+    // anything without a matching post open the notification page instead.
+    val openNotification: (AppNotification) -> Unit = { notification ->
+        val letterSubmission = notification.title.startsWith("Absence letter submitted")
+        val postId = notification.postId
+            ?: posts.find { it.title == notification.title }?.id
+        if (!letterSubmission && postId != null) {
+            if (notification.notificationTier() != NotificationTier.IMPORTANT) {
+                inboxViewModel.markRead(notification.id)
+            }
+            onOpenPost(postId)
+        } else {
+            onOpenDetail(notification.id)
+        }
+    }
 
     LaunchedEffect(Unit) { inboxViewModel.markScreenSeen() }
 
@@ -179,7 +205,7 @@ fun NotificationsScreen(
                 items(important, key = { it.id }) { notification ->
                     TieredSwipeRow(
                         notification = notification,
-                        onOpen = { onOpenDetail(notification.id) },
+                        onOpen = { openNotification(notification) },
                         onTrash = { swipeTarget = NotificationTier.IMPORTANT to notification }
                     )
                 }
@@ -205,7 +231,7 @@ fun NotificationsScreen(
                 items(updates, key = { it.id }) { notification ->
                     TieredSwipeRow(
                         notification = notification,
-                        onOpen = { onOpenDetail(notification.id) },
+                        onOpen = { openNotification(notification) },
                         onTrash = { swipeTarget = notification.notificationTier() to notification }
                     )
                 }

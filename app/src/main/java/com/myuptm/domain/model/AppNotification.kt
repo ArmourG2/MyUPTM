@@ -24,6 +24,9 @@ data class AppNotification(
     // Sprint 9 polish: optional illustration (Cloudinary image, like posts) and a
     // free-form "context" note the lecturer may add; blank stays blank.
     val imageUrl: String? = null,
+    // Sprint 9: when set, this notification is a POINTER to a post — tapping it goes
+    // straight to the post detail instead of the notification page.
+    val postId: String? = null,
     // Sprint 9 tiering (data-driven): "important" (red, pinned) / "attention"
     // (yellow reminder) / "normal" (blue). Null = legacy docs → derived rules.
     val importance: String? = null

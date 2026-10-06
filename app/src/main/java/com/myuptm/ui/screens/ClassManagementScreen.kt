@@ -441,7 +441,7 @@ private fun ClassManagementCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -573,7 +573,7 @@ private fun RosterCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
         )
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -745,7 +745,7 @@ private fun CountBox(count: String, label: String, color: Color, modifier: Modif
 private fun LetterCard(letter: AbsenceLetter, onApprove: () -> Unit, onDecline: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     )) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

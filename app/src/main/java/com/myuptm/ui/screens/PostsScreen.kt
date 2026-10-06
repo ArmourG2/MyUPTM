@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FloatingActionButton
@@ -16,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -40,6 +42,13 @@ fun PostsScreen(
     // Sprint 7B: only Admin and Lecturer-with-Admin may add posts.
     val canAddPost = user.toPermissions().canAddPost
 
+    // Sprint 9: the list ALWAYS opens at the TOP. The reset is keyed to the feed
+    // emission as well — the Firestore flow can emit after composition (or after a
+    // notification-triggered post insert), which used to leave the viewport
+    // anchored mid-list below the Important section.
+    val listState = rememberLazyListState()
+    LaunchedEffect(posts) { listState.scrollToItem(0) }
+
     // Box allows us to layer the FAB over the LazyColumn
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -56,6 +65,7 @@ fun PostsScreen(
                 )
             }
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)

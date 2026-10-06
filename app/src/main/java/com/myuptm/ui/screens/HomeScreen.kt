@@ -48,6 +48,7 @@ import com.myuptm.ui.components.SupportLinkTile
 import com.myuptm.ui.components.openUrl
 import com.myuptm.viewmodel.InboxViewModel
 import com.myuptm.viewmodel.HomeViewModel
+import com.myuptm.viewmodel.PostsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +76,11 @@ fun HomeScreen(navController: NavController, user: AppUser? = null) {
     )
     val inbox by inboxViewModel.inbox.collectAsState()
 
+    // Sprint 9: posts feed — resolves LEGACY post notifications (no postId) by
+    // title match, so the bell can deep-link them to the post detail too.
+    val postsViewModel: PostsViewModel = viewModel()
+    val posts by postsViewModel.posts.collectAsState()
+
     // Sprint 7B: local notifications require POST_NOTIFICATIONS on Android 13+.
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -93,8 +99,25 @@ fun HomeScreen(navController: NavController, user: AppUser? = null) {
             title = { Text("Home") },
             actions = {
                 IconButton(
-                    // Sprint 7B: opens the notification inbox (POC of B-004).
-                    onClick = { navController.navigate(MyUptmRoutes.NOTIFICATIONS) }
+                    // Sprint 9 bell routing:
+                    //  1) an IMPORTANT post notification is ALWAYS opened (read or
+                    //     unread — it's a pinned announcement, never consumed),
+                    //  2) otherwise the newest UNREAD post pointer opens directly,
+                    //  3) otherwise the inbox. Legacy docs (no postId) resolve by
+                    //     title match against the posts feed.
+                    onClick = {
+                        val target = inbox.importantPost ?: inbox.unreadPost
+                        val resolvedPostId = target?.postId
+                            ?: target?.let { t -> posts.find { it.title == t.title }?.id }
+                        if (target != null && resolvedPostId != null) {
+                            navController.navigate(MyUptmRoutes.postDetail(resolvedPostId))
+                            if (target != inbox.importantPost) {
+                                inboxViewModel.markRead(target.id)
+                            }
+                        } else {
+                            navController.navigate(MyUptmRoutes.NOTIFICATIONS)
+                        }
+                    }
                 ) {
                     // Sprint 9: red unread dot — a targeted application-level alert
                     // on the bell that clears when the inbox is opened.

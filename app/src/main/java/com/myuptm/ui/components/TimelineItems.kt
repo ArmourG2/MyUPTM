@@ -42,7 +42,7 @@ fun DayChip(
     val background = when {
         selected -> MaterialTheme.colorScheme.primary
         isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     val foreground = if (selected) {
         MaterialTheme.colorScheme.onPrimary

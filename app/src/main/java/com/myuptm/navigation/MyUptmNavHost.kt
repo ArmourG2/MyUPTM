@@ -33,15 +33,22 @@ import com.myuptm.ui.screens.HomeScreen
 import com.myuptm.ui.screens.NotificationDetailScreen
 import com.myuptm.ui.screens.NotificationsScreen
 import com.myuptm.ui.screens.WarningLettersScreen
+import com.myuptm.ui.screens.MissedClassesScreen
 import com.myuptm.ui.screens.PostDetailScreen
 import com.myuptm.ui.screens.PostsScreen
 import com.myuptm.ui.screens.ProfileScreen
 import com.myuptm.ui.screens.SettingsScreen
 import com.myuptm.ui.screens.SignInScreen
 import com.myuptm.ui.screens.TimetableScreen
+import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
+import com.myuptm.data.repository.FirestoreProfileRepository
+import com.myuptm.data.repository.RealCloudinaryRepository
 import com.myuptm.viewmodel.AuthState
 import com.myuptm.viewmodel.AuthViewModel
 import com.myuptm.viewmodel.PostsViewModel
+import com.myuptm.viewmodel.ProfileViewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.platform.LocalContext
 
 
@@ -60,6 +67,24 @@ fun MyUptmNavHost(
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
     val errorMessage by authViewModel.errorMessage.collectAsStateWithLifecycle()
     val userRecord by authViewModel.userRecord.collectAsStateWithLifecycle()
+
+    // Sprint 9 (late): Profile + MissedClasses share ONE activity-scoped ProfileViewModel
+    // (same default VM key + same store owner), so letter states and live stats stay
+    // consistent across the navigation.
+    val profileFactory = viewModelFactory {
+        initializer {
+            val app = this[androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY]
+                as android.content.Context
+            ProfileViewModel(
+                profileRepository = FirestoreProfileRepository(),
+                cloudinaryRepository = RealCloudinaryRepository(app),
+                lettersRepository = FirestoreAbsenceLetterRepository()
+            )
+        }
+    }
+    val sharedProfileViewModel: @Composable () -> ProfileViewModel = {
+        viewModel(factory = profileFactory)
+    }
 
     val startDestination = if (authViewModel.isLoggedIn) HOME else SIGN_IN
 
@@ -115,7 +140,16 @@ fun MyUptmNavHost(
                 LoadingBox()
             }
         }
-        composable(MyUptmRoutes.PROFILE) { ProfileScreen(navController = navController) }
+        composable(MyUptmRoutes.PROFILE) {
+            ProfileScreen(navController = navController, profileViewModel = sharedProfileViewModel())
+        }
+
+        composable(MyUptmRoutes.MISSED_CLASSES) {
+            MissedClassesScreen(
+                viewModel = sharedProfileViewModel(),
+                onBackClick = { navController.popBackStack() }
+            )
+        }
 
         composable(MyUptmRoutes.ADMIN_DASHBOARD) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -150,7 +184,8 @@ fun MyUptmNavHost(
             NotificationsScreen(
                 user = userRecord,
                 onBackClick = { navController.popBackStack() },
-                onOpenDetail = { id -> navController.navigate(MyUptmRoutes.notifDetail(id)) }
+                onOpenDetail = { id -> navController.navigate(MyUptmRoutes.notifDetail(id)) },
+                onOpenPost = { id -> navController.navigate(MyUptmRoutes.postDetail(id)) }
             )
         }
 
@@ -159,7 +194,11 @@ fun MyUptmNavHost(
             arguments = listOf(navArgument("notifId") { type = NavType.StringType })
         ) { backStackEntry ->
             val notifId = backStackEntry.arguments?.getString("notifId").orEmpty()
-            NotificationDetailScreen(notifId = notifId, onBackClick = { navController.popBackStack() })
+            NotificationDetailScreen(
+                notifId = notifId,
+                canReview = userRecord?.toPermissions()?.canManageClassGlobal == true,
+                onBackClick = { navController.popBackStack() }
+            )
         }
 
         composable(MyUptmRoutes.ENROLLED_SECTIONS) {

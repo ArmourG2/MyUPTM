@@ -26,6 +26,7 @@ interface NotificationsRepository {
         staffOnly: Boolean = false,
         importance: String? = null,
         studentOnly: Boolean = false,
-        imageUrl: String? = null
+        imageUrl: String? = null,
+        postId: String? = null
     ): Result<Unit>
 }

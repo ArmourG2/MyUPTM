@@ -105,11 +105,19 @@ fun MyUptmApp() {
 
     if (showUnreadPopup) {
         UnreadNotificationPopup(
-            latest = inboxState.list.maxByOrNull { it.createdAtEpochMs },
+            latest = inboxState.unreadPost ?: inboxState.list.maxByOrNull { it.createdAtEpochMs },
             unreadCount = inboxState.unread,
+            isPost = inboxState.unreadPost != null,
             onView = {
                 popupDismissed = true
-                navController.navigate(MyUptmRoutes.NOTIFICATIONS)
+                // Deep-link: post pointers open the post itself.
+                val target = inboxState.unreadPost
+                if (target?.postId != null) {
+                    inboxViewModel.markRead(target.id)
+                    navController.navigate(MyUptmRoutes.postDetail(target.postId ?: ""))
+                } else {
+                    navController.navigate(MyUptmRoutes.NOTIFICATIONS)
+                }
             },
             onDismiss = {
                 // Popup dismiss clears yellow+blue (red stays pinned — upload rules).
@@ -126,6 +134,7 @@ fun MyUptmApp() {
 private fun UnreadNotificationPopup(
     latest: AppNotification?,
     unreadCount: Int,
+    isPost: Boolean,
     onView: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -185,7 +194,9 @@ private fun UnreadNotificationPopup(
                     ) {
                         TextButton(onClick = onDismiss) { Text("Dismiss") }
                         Spacer(Modifier.width(8.dp))
-                        TextButton(onClick = onView) { Text("Open inbox") }
+                        TextButton(onClick = onView) {
+                            Text(if (isPost) "Open post" else "Open inbox")
+                        }
                     }
                 }
                 // Right-edge red bar (wireframe).

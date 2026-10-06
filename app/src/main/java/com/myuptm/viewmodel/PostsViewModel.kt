@@ -84,13 +84,16 @@ class PostsViewModel(application: Application) : AndroidViewModel(application) {
                 // Sprint 9: every published post ALSO lands in the notification
                 // section, tiered by the author's importance choice (Normal → blue,
                 // Attention → yellow, Important → red & pushed to staff too).
+                // `postId` turns the notification into a POINTER — tapping it opens
+                // the post itself instead of a dedicated notification page.
                 notificationsRepository.sendNotification(
                     com.myuptm.domain.model.NotificationType.ANNOUNCEMENT,
                     title = post.title,
                     message = post.snippet,
                     senderName = post.facultyTag,
                     staffOnly = false,
-                    importance = importance
+                    importance = importance,
+                    postId = post.id
                 ).getOrThrow()
             }.onSuccess {
                 _submitState.value = SubmitState(submitted = true)
