@@ -12,6 +12,7 @@ import androidx.camera.core.SurfaceRequest
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.lifecycle.awaitInstance
+import androidx.camera.viewfinder.core.ImplementationMode
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -351,6 +352,9 @@ private fun CameraScanner(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var surfaceRequest by remember { mutableStateOf<SurfaceRequest?>(null) }
+    // Keep a main-thread-safe handle to the provider so dispose never needs
+    // the blocking get() (that hung during rapid tab toggles → frozen preview).
+    var providerRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val executor = remember { Executors.newSingleThreadExecutor() }
     val scanner = remember {
         BarcodeScanning.getClient(
@@ -370,7 +374,11 @@ private fun CameraScanner(
     DisposableEffect(Unit) {
         onDispose {
             paused.set(true)
-            runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
+            // Cancel any undelivered surface contract — CameraX otherwise waits
+            // forever for a surface from a screen that no longer exists.
+            surfaceRequest?.willNotProvideSurface()
+            surfaceRequest = null
+            runCatching { providerRef?.unbindAll() }
             runCatching { scanner.close() }
             executor.shutdown()
         }
@@ -378,6 +386,9 @@ private fun CameraScanner(
 
     LaunchedEffect(Unit) {
         val provider = ProcessCameraProvider.awaitInstance(context)
+        providerRef = provider
+        // Fresh run: clear a stale decode cooldown so re-entry isn't blocked.
+        lastDecode.set(0L)
         val preview = Preview.Builder().build().apply {
             setSurfaceProvider { request -> surfaceRequest = request }
         }
@@ -420,13 +431,23 @@ private fun CameraScanner(
                 analysis
             )
         }
-        paused.set(false)
+        // Arm the gate AFTER the camera is live; sync with [active] (the paused
+        // flag above is only the verification gate).
+        paused.set(!active)
     }
 
     Box(modifier, contentAlignment = Alignment.Center) {
         val request = surfaceRequest
         if (request != null) {
-            CameraXViewfinder(surfaceRequest = request, modifier = Modifier.fillMaxSize())
+            // EMBEDDED (TextureView): the preview composites through Compose's
+            // draw tree, so it fades with the screen during nav transitions —
+            // EXTERNAL/SurfaceView (the default) punches a hole and ghosts
+            // through the fading destination (the transition bug from testing).
+            CameraXViewfinder(
+                surfaceRequest = request,
+                implementationMode = ImplementationMode.EMBEDDED,
+                modifier = Modifier.fillMaxSize()
+            )
         } else {
             CircularProgressIndicator()
         }
@@ -444,7 +465,6 @@ private fun CornerBracketFrame(size: androidx.compose.ui.unit.Dp, modifier: Modi
         val stroke = 5.dp.toPx()
         val arm = 40.dp.toPx()
         val color = Color.White.copy(alpha = 0.9f)
-        val style = Stroke(width = stroke, cap = StrokeCap.Round)
         val w = this.size.width
         val h = this.size.height
 
