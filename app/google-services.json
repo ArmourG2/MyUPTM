@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "897619036861-245nocj2aorjujm9dnpah544s3s5kf8i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.myuptm",
+            "certificate_hash": "1aaf1a3616300140394f1b6817283cdebe0043cd"
+          }
+        },
+        {
           "client_id": "897619036861-l0gbqhv5o71fq92ckn45npjtd743dce1.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
