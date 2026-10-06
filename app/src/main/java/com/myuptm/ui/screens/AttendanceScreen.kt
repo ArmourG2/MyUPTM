@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -64,10 +65,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -92,11 +96,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import androidx.compose.ui.platform.LocalLocale
 
-// Sprint 12: the attendance tab IS the scanner. The camera preview is embedded
+// Sprint 13: the attendance tab IS the scanner. The camera preview is embedded
 // (CameraX + ML Kit) and starts the moment the student opens the tab in QR
 // mode — no separate zxing Activity, the app never leaves the screen. The
-// backend check-in path (Suspense 11) is unchanged: payload/typed PIN →
+// backend check-in path (Sprint 11) is unchanged: payload/typed PIN →
 // AttendanceCheckInViewModel.verify against the 5-minute Firestore session.
+//
+// Sprint 13 light-mode cleanup: the immersive treatment (dark scrim, white
+// title, dark toggle/strip pills) exists ONLY to stay readable over a live
+// camera feed — so it is applied only when the feed is on screen. Every
+// non-camera state (PIN entry, permission panel, verified panel) renders a
+// themed header on the plain surface instead, which removes the "floating
+// shadow" effect seen in light mode.
 @Composable
 fun AttendanceScreen() {
     var isQrMode by remember { mutableStateOf(true) }
@@ -104,14 +115,52 @@ fun AttendanceScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
     val checkInViewModel: AttendanceCheckInViewModel = viewModel()
     val uiState by checkInViewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
-        // Sprint 12 (owner): IMMERSIVE — border/inset removed; the stage fills
-        // the whole content area edge-to-edge, title overlays the feed.
+    // Permission lives HERE (not in the stage) because the header styling and
+    // even the status-bar icon colour depend on whether the feed is really on.
+    var permissionState by remember { mutableStateOf(PermissionState.PENDING) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        permissionState = if (granted) PermissionState.GRANTED else PermissionState.DENIED
+    }
+    // Auto-open (owner decision, Sprint 12): the camera permission is requested
+    // the moment the student lands on the tab so the live preview starts with
+    // zero taps. Persisted grant is reused; a denial falls to the retry panel.
+    LaunchedEffect(Unit) {
+        permissionState = if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) PermissionState.GRANTED else PermissionState.PENDING
+        if (permissionState == PermissionState.PENDING) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    val feedLive =
+        permissionState == PermissionState.GRANTED && isQrMode && uiState.verifiedSession == null
+
+    // Over the feed the status bar shows WHITE icons; otherwise the theme's
+    // own choice applies (dark icons on light surface, light on dark). The
+    // theme's value is snapshotted and restored when the feed hides or this
+    // screen leaves composition.
+    val view = LocalView.current
+    DisposableEffect(feedLive) {
+        val window = (view.context as android.app.Activity).window
+        val controller = androidx.core.view.WindowCompat.getInsetsController(window, view)
+        val themeDefault = controller.isAppearanceLightStatusBars
+        controller.isAppearanceLightStatusBars = if (feedLive) true else themeDefault
+        onDispose { controller.isAppearanceLightStatusBars = themeDefault }
+    }
+
+    // Zero insets on this scaffold: the content area already accounts for the
+    // status bar, and the live feed must reach under it edge-to-edge. Overlays
+    // that must clear system UI apply their own statusBarsPadding.
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { _ ->
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
             ScannerStage(
                 modifier = Modifier.fillMaxSize(),
@@ -121,6 +170,8 @@ fun AttendanceScreen() {
                     if (it) checkInViewModel.consumeResult() // clear stale errors/mocks
                 },
                 state = uiState,
+                permissionState = permissionState,
+                onRetryPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                 pin = pin,
                 onPinChange = { value ->
                     // Self-filtering input: digits only, max 6
@@ -136,16 +187,19 @@ fun AttendanceScreen() {
                 showRecent = uiState.myCheckIns.isNotEmpty() && uiState.verifiedSession == null
             )
 
-            // Immersive title: gradient scrim at the top keeps the white text
-            // readable over any feed (bright or dark).
+            // Immersive header. The dark gradient + white text render only when
+            // the camera feed is live underneath; otherwise the header matches
+            // the theme, so light mode never shows a "shadow" with no camera.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = 0.75f),
-                            1f to Color.Transparent
-                        )
+                    .then(
+                        if (feedLive) Modifier.background(
+                            Brush.verticalGradient(
+                                0f to Color.Black.copy(alpha = 0.75f),
+                                1f to Color.Transparent
+                            )
+                        ) else Modifier
                     )
                     .statusBarsPadding()
                     .padding(top = 12.dp, bottom = 18.dp),
@@ -155,13 +209,14 @@ fun AttendanceScreen() {
                     "Attendance Verification",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = if (feedLive) Color.White else MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
                     "The code is only valid for 5 minutes after your lecturer opens the session.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.8f),
+                    color = if (feedLive) Color.White.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
@@ -183,6 +238,8 @@ private fun ScannerStage(
     isQrMode: Boolean,
     onModeChange: (Boolean) -> Unit,
     state: CheckInUiState,
+    permissionState: PermissionState,
+    onRetryPermission: () -> Unit,
     pin: String,
     onPinChange: (String) -> Unit,
     onPinSubmit: () -> Unit,
@@ -191,31 +248,14 @@ private fun ScannerStage(
     recent: List<com.myuptm.domain.model.AttendanceCheckIn>,
     showRecent: Boolean
 ) {
-    val context = LocalContext.current
-    var permissionState by remember { mutableStateOf(PermissionState.PENDING) }
-
-    // Auto-open (owner decision, Sprint 12): the camera permission is requested
-    // the moment the student lands on the tab so the live preview starts with
-    // zero taps. Persisted grant is reused; a denial falls to the retry panel.
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        permissionState = if (granted) PermissionState.GRANTED else PermissionState.DENIED
-    }
-    LaunchedEffect(Unit) {
-        permissionState = if (
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        ) PermissionState.GRANTED else PermissionState.PENDING
-        if (permissionState == PermissionState.PENDING) permissionLauncher.launch(Manifest.permission.CAMERA)
-    }
-
     val hasPermission = permissionState == PermissionState.GRANTED
+    // "Over the feed" = live camera fills the whole stage. All furniture (dark
+    // pills, scrim, white text) belongs ONLY to this state; anything else is a
+    // themed panel on the surface colour.
+    val overFeed = hasPermission && isQrMode && state.verifiedSession == null
     Box(
         modifier = modifier
-            // Full-bleed: no clip, no inset — only the non-camera states get a
-            // solid backing so panels stay readable without the feed.
-            .background(if (hasPermission && isQrMode && state.verifiedSession == null) Color.Transparent else MaterialTheme.colorScheme.surface)
+            .background(if (overFeed) Color.Transparent else MaterialTheme.colorScheme.surface)
     ) {
         when {
             // Green confirmation — replaces the viewfinder; camera is unbound.
@@ -292,7 +332,7 @@ private fun ScannerStage(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(16.dp))
-                    Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                    Button(onClick = onRetryPermission) {
                         Text("Retry camera")
                     }
                 }
@@ -305,7 +345,7 @@ private fun ScannerStage(
         }
 
         // Viewfinder furniture — brackets + caption, only while scanning camera-side.
-        if (isQrMode && state.verifiedSession == null && hasPermission) {
+        if (overFeed) {
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -314,29 +354,41 @@ private fun ScannerStage(
                 Spacer(Modifier.height(12.dp))
                 Text(
                     "Point camera at QR code",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    // Soft dark shadow keeps the caption readable on blown-out
+                    // bright frames (light mode over white walls/lights).
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.6f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 6f
+                        )
+                    ),
                     color = Color.White
                 )
             }
         }
 
-        // Recent verifications (proof strip) — translucent chip-rows floating
-        // above the mode toggle so they read on any feed.
+        // Recent verifications (proof strip) — floating chip rows. Dark
+        // translucent over the feed; themed card everywhere else.
         if (showRecent) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 88.dp, start = 20.dp, end = 20.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black.copy(alpha = 0.62f))
+                    .background(
+                        if (overFeed) Color.Black.copy(alpha = 0.62f)
+                        else MaterialTheme.colorScheme.surfaceContainer
+                    )
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Text(
                     "Recent verifications",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = 0.8f)
+                    color = if (overFeed) Color.White.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 recent.forEach { checkIn ->
                     Row(
@@ -346,38 +398,58 @@ private fun ScannerStage(
                         Icon(
                             Icons.Filled.CheckCircle,
                             contentDescription = null,
-                            tint = Color(0xFFA8E06B),
+                            tint = if (overFeed) Color(0xFFA8E06B)
+                            else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
                             checkIn.displayCode,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White
+                            color = if (overFeed) Color.White
+                            else MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
                             java.text.SimpleDateFormat("dd MMM, HH:mm", LocalLocale.current.platformLocale)
                                 .format(java.util.Date(checkIn.verifiedAt)),
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.7f)
+                            color = if (overFeed) Color.White.copy(alpha = 0.7f)
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
         }
 
-        // Mode toggle rides the bottom edge — wrapped in a DARK pill so the
-        // unselected segment stays readable on a bright feed (the bug from
-        // testing: white segment blended into a white camera frame).
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.62f))
-                .padding(5.dp)
-        ) {
-            AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
+        // Mode toggle rides the bottom edge. The DARK pill wrapper exists to
+        // keep the unselected segment readable over a bright camera frame, so
+        // it is applied only over the feed; elsewhere the bare segmented
+        // control sits on its own surface colour. Both get the nav-bar inset.
+        if (state.verifiedSession == null) {
+            if (overFeed) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.62f))
+                        .padding(5.dp)
+                ) {
+                    AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        // The app-level bottom nav already consumes the
+                        // navigation-bar inset, so no extra bar padding here —
+                        // just a small breathing gap.
+                        .padding(bottom = 8.dp)
+                ) {
+                    AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
+                }
+            }
         }
     }
 }
@@ -620,28 +692,37 @@ private const val REBIND_GAP_MS = 300L
 
 private enum class PermissionState { PENDING, GRANTED, DENIED }
 
-// Corner-bracket viewfinder, mock-referenced: four L strokes on a transparent canvas.
+// Corner-bracket viewfinder, mock-referenced: four L strokes on a transparent
+// canvas, over a soft dark under-stroke so brackets stay visible even against
+// a blown-out bright frame in light mode.
 @Composable
 private fun CornerBracketFrame(size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.size(size)) {
         val stroke = 5.dp.toPx()
         val arm = 40.dp.toPx()
-        val color = Color.White.copy(alpha = 0.9f)
+        val accent = Color.White.copy(alpha = 0.95f)
+        val shadow = Color.Black.copy(alpha = 0.35f)
         val w = this.size.width
         val h = this.size.height
 
+        fun armPoints(x1: Float, y1: Float, x2: Float, y2: Float) {
+            // Dark hairline under a white main stroke = works on any feed.
+            drawLine(shadow, androidx.compose.ui.geometry.Offset(x1, y1), androidx.compose.ui.geometry.Offset(x2, y2), stroke + 4f, StrokeCap.Round)
+            drawLine(accent, androidx.compose.ui.geometry.Offset(x1, y1), androidx.compose.ui.geometry.Offset(x2, y2), stroke, StrokeCap.Round)
+        }
+
         // Top-left: horizontal arm + vertical arm
-        drawLine(color, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(arm, 0f), stroke, StrokeCap.Round)
-        drawLine(color, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(0f, arm), stroke, StrokeCap.Round)
+        armPoints(0f, 0f, arm, 0f)
+        armPoints(0f, 0f, 0f, arm)
         // Top-right
-        drawLine(color, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w - arm, 0f), stroke, StrokeCap.Round)
-        drawLine(color, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w, arm), stroke, StrokeCap.Round)
+        armPoints(w, 0f, w - arm, 0f)
+        armPoints(w, 0f, w, arm)
         // Bottom-left
-        drawLine(color, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(arm, h), stroke, StrokeCap.Round)
-        drawLine(color, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(0f, h - arm), stroke, StrokeCap.Round)
+        armPoints(0f, h, arm, h)
+        armPoints(0f, h, 0f, h - arm)
         // Bottom-right
-        drawLine(color, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w - arm, h), stroke, StrokeCap.Round)
-        drawLine(color, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w, h - arm), stroke, StrokeCap.Round)
+        armPoints(w, h, w - arm, h)
+        armPoints(w, h, w, h - arm)
     }
 }
 
