@@ -86,7 +86,12 @@ class FirestoreUserRepository(
             email = getString("email").orEmpty(),
             role = role,
             approved = getBoolean("approved") ?: false,
-            isAdminPrivilege = getBoolean("isAdminPrivilege") ?: false
+            isAdminPrivilege = getBoolean("isAdminPrivilege") ?: false,
+            fullName = getString("fullName"),
+            faculty = getString("faculty"),
+            programme = getString("programme"),
+            semester = getLong("semester")?.toInt(),
+            studentId = getString("studentId")
         )
     }
 

@@ -33,7 +33,7 @@ data class BottomNavItem(
 )
 // Returns the correct list of tabs based on the user's role.
 @Composable
-fun getBottomNavItems(userRole: UserRole): List<BottomNavItem> {
+fun getBottomNavItems(userRole: UserRole, enrolledStudent: Boolean): List<BottomNavItem> {
     val baseItems = listOf(
         BottomNavItem(MyUptmRoutes.HOME, "Home", Icons.Filled.Home),
         BottomNavItem(MyUptmRoutes.POSTS, "Posts", Icons.Filled.Email),
@@ -43,12 +43,18 @@ fun getBottomNavItems(userRole: UserRole): List<BottomNavItem> {
     // Insert role-specific tabs in the correct order (Home, [RoleTab1], [RoleTab2], Posts, Profile)
     return when (userRole) {
         UserRole.STUDENT -> {
-            // Student gets Timetable and Attendance
-            val studentTabs = listOf(
-                BottomNavItem(MyUptmRoutes.TIMETABLE, "Timetable", Icons.Filled.DateRange),
-                BottomNavItem(MyUptmRoutes.ATTENDANCE, "Attendance", Icons.Filled.CheckCircle)
-            )
-            listOf(baseItems[0]) + studentTabs + baseItems.subList(1, 3)
+            // Sprint 13C: a fresh (un-enrolled) registration has no classes,
+            // attendance or plans — they get the lean 3-tab nav until the admin
+            // enrols them (enrolled accounts keep the full 5-tab nav).
+            if (!enrolledStudent) baseItems
+            else {
+                // Student gets Timetable and Attendance
+                val studentTabs = listOf(
+                    BottomNavItem(MyUptmRoutes.TIMETABLE, "Timetable", Icons.Filled.DateRange),
+                    BottomNavItem(MyUptmRoutes.ATTENDANCE, "Attendance", Icons.Filled.CheckCircle)
+                )
+                listOf(baseItems[0]) + studentTabs + baseItems.subList(1, 3)
+            }
         }
         UserRole.LECTURER -> {
             // Lecturer gets Timetable and Class Management (replaces Attendance)
@@ -77,13 +83,15 @@ fun getBottomNavItems(userRole: UserRole): List<BottomNavItem> {
 @Composable
 fun BottomNavBar(
     navController: NavHostController,
-        userRole: UserRole // <-- Added role parameter
+        userRole: UserRole, // <-- Added role parameter
+    // Sprint 13C: false for fresh registrations — they get the lean 3-tab nav.
+    enrolledStudent: Boolean = true
 ) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
     // Dynamically get items based on role
-    val navItems = getBottomNavItems(userRole)
+    val navItems = getBottomNavItems(userRole, enrolledStudent)
 
     val timetableViewModel: TimetableViewModel = viewModel(
         viewModelStoreOwner = LocalContext.current as ViewModelStoreOwner

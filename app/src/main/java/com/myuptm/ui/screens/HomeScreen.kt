@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -139,8 +140,22 @@ fun HomeScreen(navController: NavController, user: AppUser? = null) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
-                NextClassCard(session = uiState.nextClass, label = uiState.countdownLabel)
+            // Sprint 13C: an un-enrolled STUDENT has no classes — instead of an
+            // empty hole, Home shows a "Pending assignment by Lecturer" card.
+            // (The bug this replaces: `user?.role != STUDENT` was true for a
+            // null user, so the demo next-class card leaked to pending logins.)
+            val demoEnrolled = when (user?.role) {
+                UserRole.STUDENT -> com.myuptm.data.repository.MockAttendanceRoster.isEnrolledDemoStudent(
+                    user.studentId, user.email
+                )
+                else -> true // lecturers/admins keep the existing behaviour
+            }
+            if (demoEnrolled) {
+                item {
+                    NextClassCard(session = uiState.nextClass, label = uiState.countdownLabel)
+                }
+            } else {
+                item { PendingAssignmentCard() }
             }
             item { SectionHeader("Announcements") }
             items(uiState.announcements) { post ->
@@ -177,4 +192,33 @@ private fun SectionHeader(title: String) {
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.SemiBold
     )
+}
+
+// Sprint 13C: fresh registrations wait for the LECTURER/faculty head to assign
+// them classes (out-of-scope step) — this card tells the student exactly that,
+// so the Home slot never looks broken/empty.
+@Composable
+private fun PendingAssignmentCard() {
+    androidx.compose.material3.Card(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        androidx.compose.foundation.layout.Column(modifier = Modifier.padding(18.dp)) {
+            Text(
+                "Pending assignment by Lecturer",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "You are not assigned to any class yet. Once your lecturer assigns you to a class, " +
+                    "your schedule and attendance will appear here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
 }

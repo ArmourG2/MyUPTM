@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,6 +73,13 @@ fun MyUptmApp() {
     val authViewModel: AuthViewModel = viewModel()
     val userRole by authViewModel.userRole.collectAsState()
     val userRecord by authViewModel.userRecord.collectAsState()
+    // Sprint 13C: identity fetch gate (kills the bar-less Home flash on cold start).
+    val identityReady by authViewModel.identityReady.collectAsState()
+    // Sprint 13C: enrollment gate — roster-backed accounts see the demo board;
+    // fresh registrations are empty by design.
+    val enrolledStudent = userRecord?.let {
+        com.myuptm.data.repository.MockAttendanceRoster.isEnrolledDemoStudent(it.studentId, it.email)
+    } ?: false
     // Sprint 9: one app-lifetime inbox listener (shade push + unread dot for all roles).
     val inboxViewModel: InboxViewModel = viewModel()
     val inboxState by inboxViewModel.inbox.collectAsState()
@@ -93,15 +102,27 @@ fun MyUptmApp() {
             if (showBottomBar && userRole != null) {
                 BottomNavBar(
                     navController = navController,
-                    userRole = userRole!!
+                    userRole = userRole!!,
+                    enrolledStudent = enrolledStudent
                 )
             }
         }
     ) { innerPadding ->
-        MyUptmNavHost(
-            navController = navController,
-            modifier = Modifier.padding(innerPadding)
-        )
+        if (authViewModel.isLoggedIn && !identityReady) {
+            // Sprint 13C: identity gate — nothing renders until the role fetch
+            // settles, so there is never a "content without the nav bar" frame.
+            androidx.compose.foundation.layout.Box(
+                modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            MyUptmNavHost(
+                navController = navController,
+                modifier = Modifier.padding(innerPadding)
+            )
+        }
     }
 
     if (showUnreadPopup) {

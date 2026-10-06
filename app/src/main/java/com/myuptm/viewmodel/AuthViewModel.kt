@@ -55,6 +55,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     val pendingEmail: StateFlow<String?> = _pendingEmail.asStateFlow()
     private var approvalJob: kotlinx.coroutines.Job? = null
 
+    // Sprint 13C: true once the signed-in account's identity fetch has SETTLED
+    // (role known / waiting parked / bounced). MainActivity holds the NavHost
+    // behind a loading gate until then — kills the bar-less Home flash on
+    // cold starts.
+    private val _identityReady = MutableStateFlow(false)
+    val identityReady: StateFlow<Boolean> = _identityReady.asStateFlow()
+
 
     fun signIn(activity: Activity) {
         viewModelScope.launch {
@@ -90,6 +97,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val record = recordResult.getOrNull()
+            _identityReady.value = true
 
             // Sprint 13 (pending-approval flow): an account with NO users/{uid}
             // doc registers a PENDING skeleton and waits — the Admin Dashboard
@@ -188,6 +196,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.onFailure {
                     signOut() // Network/read problem — back to the sign-in screen
+                }.also {
+                    _identityReady.value = true
                 }
             }
         }

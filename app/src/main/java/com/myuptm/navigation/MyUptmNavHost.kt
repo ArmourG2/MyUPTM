@@ -10,8 +10,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,6 +53,7 @@ import com.myuptm.viewmodel.ProfileViewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.collectAsState
 
 
 /**
@@ -87,7 +90,15 @@ fun MyUptmNavHost(
         viewModel(factory = profileFactory)
     }
 
-    val startDestination = if (authViewModel.isLoggedIn) HOME else SIGN_IN
+    // Sprint 13C fix: the start destination is FROZEN at first composition —
+    // flipping isLoggedIn mid-session (pending accounts now keep auth ALIVE)
+    // used to re-evaluate this and retroactively jump to HOME on top of the
+    // waiting screen (the friend's "fallback dashboard" bug). Landing is
+    // decided by the ROLE at gate time; runtime navigation is driven by the
+    // SUCCESS effect below.
+    val startDestination = remember {
+        if (authViewModel.userRole.value != null) HOME else SIGN_IN
+    }
 
     LaunchedEffect(authState) {
         if (authState == AuthState.SUCCESS) {
@@ -134,7 +145,7 @@ fun MyUptmNavHost(
                 isLoading = authState == AuthState.LOADING, // Pass this to show a spinner
                 // Sprint 13: pending-account approval park
                 isWaitingApproval = authState == AuthState.WAITING_APPROVAL,
-                waitingEmail = authViewModel.pendingEmail.value,
+                waitingEmail = authViewModel.pendingEmail.collectAsState().value,
                 onCancelWait = { authViewModel.signOut() }
             )
         }
@@ -142,10 +153,36 @@ fun MyUptmNavHost(
         composable(MyUptmRoutes.TIMETABLE) {
             val record = userRecord
             if (record != null) {
-                TimetableScreen(
-                    user = record,
-                    onOpenClassManagement = { navController.navigate(MyUptmRoutes.CLASS_MANAGEMENT) }
-                )
+                val unEnrolledStudent = record.role == com.myuptm.domain.model.UserRole.STUDENT &&
+                    !com.myuptm.data.repository.MockAttendanceRoster
+                        .isEnrolledDemoStudent(record.studentId, record.email)
+                if (unEnrolledStudent) {
+                    // Sprint 13C: fresh registrations have an EMPTY timetable —
+                    // no demo board, no plans, nothing until the lecturer
+                    // assigns them (same message as the Home dashboard card).
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+                    ) {
+                        Text(
+                            "Pending assignment by Lecturer",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "You are not assigned to any class yet. Your timetable appears once your lecturer assigns you.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                } else {
+                    TimetableScreen(
+                        user = record,
+                        onOpenClassManagement = { navController.navigate(MyUptmRoutes.CLASS_MANAGEMENT) }
+                    )
+                }
             } else {
                 LoadingBox()
             }

@@ -1,5 +1,6 @@
 package com.myuptm.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,7 +22,11 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +77,14 @@ fun AdminDashboardScreen(
     // Sprint 13: role-assignment dialog state (the account being reassigned).
     var pendingDialog by remember { mutableStateOf<AdminDashboardViewModel.PendingAccount?>(null) }
 
+    // Sprint 13C: tile directory dialogs.
+    var showStudentsDialog by remember { mutableStateOf(false) }
+    var showLecturersDialog by remember { mutableStateOf(false) }
+    var showClassesDialog by remember { mutableStateOf(false) }
+    val studentsDirectory by dashboardViewModel.students.collectAsState()
+    val lecturersDirectory by dashboardViewModel.lecturers.collectAsState()
+    val classDirectory by dashboardViewModel.classRows.collectAsState()
+
     // Same bell behaviour the student/lecturer Home screen has — the inbox is
     // activity-scoped, so the unread dot + deep-link routing stay consistent.
     val inbox by inboxViewModel.inbox.collectAsState()
@@ -102,21 +116,24 @@ fun AdminDashboardScreen(
             // ---- Overview tiles ----
             // Sprint 12: vector drawables instead of material-icons-extended
             // (the extended library costs ~35 MB of dex for 6 icons).
+            // Sprint 13C: Students/Lecturers/Classes tiles open their directory.
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatTile(
                         icon = ImageVector.vectorResource(R.drawable.ic_people),
                         label = "Students",
-                        value = "${state.studentCount}",
-                        note = "POC roster figure",
-                        modifier = Modifier.weight(1f)
+                        value = "${if (studentsDirectory.isNotEmpty()) studentsDirectory.size else state.studentCount}",
+                        note = "Tap to view the roster list",
+                        modifier = Modifier.weight(1f),
+                        onClick = { showStudentsDialog = true }
                     )
                     StatTile(
                         icon = ImageVector.vectorResource(R.drawable.ic_badge),
                         label = "Lecturers",
                         value = "${state.lecturerCount}",
-                        note = "Live accounts",
-                        modifier = Modifier.weight(1f)
+                        note = "Tap to view lecturer accounts",
+                        modifier = Modifier.weight(1f),
+                        onClick = { showLecturersDialog = true }
                     )
                 }
             }
@@ -126,8 +143,9 @@ fun AdminDashboardScreen(
                         icon = ImageVector.vectorResource(R.drawable.ic_class),
                         label = "Classes",
                         value = "${state.classCount}",
-                        note = "All programmes",
-                        modifier = Modifier.weight(1f)
+                        note = "Tap to view the class list",
+                        modifier = Modifier.weight(1f),
+                        onClick = { showClassesDialog = true }
                     )
                     StatTile(
                         icon = ImageVector.vectorResource(R.drawable.ic_mail),
@@ -218,18 +236,26 @@ fun AdminDashboardScreen(
         }
     }
 
-    // Sprint 13: role-assignment dialog — pick a role (+ optional admin
-    // privilege) and write it; every client watching that doc resumes itself.
+    // Sprint 13C: role-assignment dialog — pick a role; students also get
+    // faculty/programme/semester + auto-derived student ID.
     pendingDialog?.let { dialogAccount ->
-        var chosenRole by remember(dialogAccount.uid) {
-            mutableStateOf(UserRole.STUDENT)
-        }
+        var chosenRole by remember(dialogAccount.uid) { mutableStateOf(UserRole.STUDENT) }
         var chosenAdminPrivilege by remember(dialogAccount.uid) { mutableStateOf(false) }
+        // Student fields — faculty dropdown, programme, semester (default 6),
+        // student ID auto-derived from the UPTM email (kl+digits → AM+digits).
+        var chosenFaculty by remember(dialogAccount.uid) {
+            mutableStateOf(AdminDashboardViewModel.FACULTY_OPTIONS[0])
+        }
+        var programme by remember(dialogAccount.uid) { mutableStateOf("") }
+        var chosenSemester by remember(dialogAccount.uid) {
+            mutableStateOf(AdminDashboardViewModel.DEFAULT_SEMESTER)
+        }
+        var studentId by remember(dialogAccount.uid) {
+            mutableStateOf(dashboardViewModel.deriveStudentId(dialogAccount.email))
+        }
         AlertDialog(
             onDismissRequest = { pendingDialog = null },
-            title = {
-                Text("Assign role", style = MaterialTheme.typography.titleLarge)
-            },
+            title = { Text("Assign role", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Column {
                     Text(
@@ -241,19 +267,49 @@ fun AdminDashboardScreen(
                     RoleRadioRow("Student", UserRole.STUDENT, chosenRole) { chosenRole = it }
                     RoleRadioRow("Lecturer", UserRole.LECTURER, chosenRole) { chosenRole = it }
                     RoleRadioRow("Admin", UserRole.ADMIN, chosenRole) { chosenRole = it }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
+                    if (chosenRole != UserRole.ADMIN) {
+                        LabeledDropdown(
+                            label = "Faculty",
+                            options = AdminDashboardViewModel.FACULTY_OPTIONS,
+                            selected = chosenFaculty,
+                            onSelect = { chosenFaculty = it }
+                        )
+                    }
+                    if (chosenRole == UserRole.STUDENT) {
+                        OutlinedTextField(
+                            value = programme,
+                            onValueChange = { programme = it },
+                            label = { Text("Programme") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        LabeledDropdown(
+                            label = "Semester (defaults to 6)",
+                            options = AdminDashboardViewModel.SEMESTER_OPTIONS.map { "Semester $it" },
+                            selectedIndex = AdminDashboardViewModel.SEMESTER_OPTIONS.indexOf(chosenSemester),
+                            onSelectIndex = { chosenSemester = AdminDashboardViewModel.SEMESTER_OPTIONS[it] }
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = studentId,
+                            onValueChange = { studentId = it },
+                            label = { Text("Student ID (auto-filled from the email)") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Switch(checked = chosenAdminPrivilege, onCheckedChange = { chosenAdminPrivilege = it })
                         Text(
-                            "Admin privilege (notify / manual notify composer)",
+                            "Admin privilege (notify composer)",
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
                     status?.let { line ->
                         Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     }
@@ -266,7 +322,12 @@ fun AdminDashboardScreen(
                         dashboardViewModel.approveAccount(
                             uid = dialogAccount.uid,
                             role = chosenRole,
-                            adminPrivilege = chosenAdminPrivilege or (chosenRole == UserRole.ADMIN)
+                            // Admins always carry the privilege.
+                            adminPrivilege = chosenAdminPrivilege || chosenRole == UserRole.ADMIN,
+                            faculty = if (chosenRole == UserRole.ADMIN) null else chosenFaculty,
+                            programme = if (chosenRole == UserRole.STUDENT) programme else null,
+                            semester = if (chosenRole == UserRole.STUDENT) chosenSemester.toInt() else null,
+                            studentId = if (chosenRole == UserRole.STUDENT) studentId else null
                         )
                         pendingDialog = null
                     }
@@ -275,6 +336,35 @@ fun AdminDashboardScreen(
             dismissButton = {
                 TextButton(onClick = { pendingDialog = null }) { Text("Cancel") }
             }
+        )
+    }
+
+    // Sprint 13C: the three tile directories.
+    if (showStudentsDialog) {
+        SimpleDirectoryDialog(
+            title = "Students (${studentsDirectory.size})",
+            headline = { "${it.name};" },
+            subline = { "${it.studentId} · ${it.faculty}" },
+            rows = studentsDirectory,
+            onDismiss = { showStudentsDialog = false }
+        )
+    }
+    if (showLecturersDialog) {
+        SimpleDirectoryDialog(
+            title = "Lecturers (${lecturersDirectory.size})",
+            headline = { "${it.name};" },
+            subline = { "${it.email} · ${it.classCount} class(es)" },
+            rows = lecturersDirectory,
+            onDismiss = { showLecturersDialog = false }
+        )
+    }
+    if (showClassesDialog) {
+        SimpleDirectoryDialog(
+            title = "Classes (${classDirectory.size})",
+            headline = { "${it.code};" },
+            subline = { it.name },
+            rows = classDirectory,
+            onDismiss = { showClassesDialog = false }
         )
     }
 }
@@ -298,6 +388,133 @@ private fun RoleRadioRow(
     }
 }
 
+// Sprint 13C: compact ExposedDropdown for the approval dialog forms.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LabeledDropdown(
+    label: String,
+    options: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+// String-option overload bridging the semester number dropdown.
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun LabeledDropdown(
+    label: String,
+    options: List<String>,
+    selectedIndex: Int,
+    onSelectIndex: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = if (selectedIndex >= 0) options[selectedIndex] else "",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEachIndexed { index, option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelectIndex(index)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+// Sprint 13C: scrollable directory for the tile lists (Students/Lecturers/Classes).
+@Composable
+private fun <T> SimpleDirectoryDialog(
+    title: String,
+    rows: List<T>,
+    headline: (T) -> String,
+    subline: (T) -> String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = MaterialTheme.typography.titleLarge) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (rows.isEmpty()) {
+                    item {
+                        Text(
+                            "Nothing here yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                items(rows.size) { index ->
+                    val row = rows[index]
+                    Column {
+                        Text(headline(row), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            subline(row),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+
 @Composable
 private fun StatTile(
     icon: ImageVector,
@@ -305,7 +522,9 @@ private fun StatTile(
     value: String,
     note: String,
     modifier: Modifier = Modifier,
-    highlight: Boolean = false
+    highlight: Boolean = false,
+    // Sprint 13C: fires the tile's directory dialog.
+    onClick: (() -> Unit)? = null
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -313,7 +532,7 @@ private fun StatTile(
             containerColor = if (highlight) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainer
         ),
-        modifier = modifier
+        modifier = modifier.clickable(enabled = onClick != null) { onClick?.invoke() }
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Icon(

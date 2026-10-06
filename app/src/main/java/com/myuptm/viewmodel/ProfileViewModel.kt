@@ -115,7 +115,15 @@ class ProfileViewModel(
                 if (profile.role != UserRole.STUDENT) {
                     _uiState.value = _uiState.value.copy(attendance = null)
                 } else {
-                    observeAttendance()
+                    // Sprint 13C (enrollment gate): the demo attendance model is
+                    // roster-backed — an un-enrolled registration (fresh
+                    // accounts) has NO attendance data at all, instead of
+                    // silently falling back to the demo user's statistics.
+                    if (MockAttendanceRoster.isEnrolledDemoStudent(profile.studentId, profile.email)) {
+                        observeAttendance()
+                    } else {
+                        _uiState.value = _uiState.value.copy(attendance = null)
+                    }
                 }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(

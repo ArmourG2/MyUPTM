@@ -99,11 +99,7 @@ object MockAttendanceRoster {
     }
 
     // Sprint 9: deterministic attendance RECORD dates for the lecturer's drill-in
-    // (wireframe "View Attendance"). Generates the past `totalSessionsPerSubject`
-    // occurrences of the class's weekday, most recent first. The LIVE missed count
-    // marks that-many TOP rows "Missed"; the rest "Attend" — submitting an excuse
-    // letter flips a row green consistently with the roster badge + Profile stats.
-    // (POC seam: no real attendance recording yet — same documented family.)
+    // (wireframe "View Attendance"). ...
     fun recordSlots(classSession: com.myuptm.domain.model.ClassSession): List<java.time.LocalDate> {
         val today = java.time.LocalDate.now()
         val dates = ArrayList<java.time.LocalDate>(totalSessionsPerSubject)
@@ -113,6 +109,30 @@ object MockAttendanceRoster {
             cursor = cursor.minusDays(1)
         }
         return dates
+    }
+
+    // ---- Sprint 13C: enrollment gate + roster directory --------------------
+    // An account is ENROLLED when its matric appears in one of the baked
+    // section lists. The demo student's console doc predates the studentId
+    // field, so the matric falls back to the UPTM email (kl+digits → AM+digits)
+    // before giving up — everyone else is a fresh, empty registration.
+    private val UPTM_EMAIL_MATRIC = Regex("kl(\\d+)@student\\.uptm\\.edu\\.my", RegexOption.IGNORE_CASE)
+
+    // All real roster (name, matric) pairs — also seeds the Firestore `students`
+    // directory (Database mark) on first dashboard read. Reads LAZILY because
+    // the section lists are declared further down in this object.
+    val ALL_ROSTER_STUDENTS: List<Pair<String, String>>
+        get() = (SECTION_1 + SECTION_2 + SECTION_3).distinctBy { it.second }
+
+    fun resolvedMatricFor(studentId: String?, email: String?): String? {
+        studentId?.takeIf { it.isNotBlank() }?.let { return it }
+        val digits = UPTM_EMAIL_MATRIC.find(email.orEmpty())?.groupValues?.get(1)
+        return digits?.let { "AM$it" }
+    }
+
+    fun isEnrolledDemoStudent(studentId: String?, email: String?): Boolean {
+        val resolved = resolvedMatricFor(studentId, email) ?: return false
+        return ALL_ROSTER_STUDENTS.any { (_, matric) -> matric.matchesMatric(resolved) }
     }
 
     // SECTION 1 — 21 students (owner-provided list).
