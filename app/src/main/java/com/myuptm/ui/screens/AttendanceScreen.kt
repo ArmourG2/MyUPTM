@@ -49,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,6 +78,8 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.myuptm.viewmodel.AttendanceCheckInViewModel
 import com.myuptm.viewmodel.AttendanceCheckInViewModel.CheckInUiState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -339,14 +342,73 @@ private fun ScannerStage(
 }
 
 // The live decoder: binds Preview + ImageAnalysis to the owner's lifecycle for
-// as long as this composable exists; ML Kit scans every third QR frame-class
+// as long as this composable exists; ML Kit scans each latest QR frame-class
 // image (keep-only-latest) and pushes payloads up through [onCode]. Governor:
 // a 2.5 s cooldown between decodes so one frame never double-fires a verify,
 // plus a pause flag while a verification is in flight.
+//
+// Frame watchdog (Sprint 12): MIUI's camera HAL occasionally STALLS the stream
+// mid-run (one washed-out frame stays on screen, camera indicator stays on) —
+// seen when moving the phone around. Recovery = full unbind/rebind, the same
+// thing the PIN-toggle workaround does by hand. The analyzer timestamp every
+// arriving frame; a coroutine marks the scanner dead when nothing arrives for
+// WATCHDOG_TIMEOUT_MS while it should be live, then bumps [rebindKey] to
+// remount this composable from scratch. Capped retries prevent a hot loop.
 @Composable
 private fun CameraScanner(
     onCode: (String) -> Unit,
     active: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // Remount key: bumped by the stall watchdog → DisposableEffect/LaunchedEffect
+    // re-run from scratch (fresh bind = fresh streams, exactly like the manual
+    // PIN toggle recovery).
+    var rebindKey by remember { mutableStateOf(0) }
+    var stalled by remember { mutableStateOf(false) }
+
+    key(rebindKey) {
+        // Inner scanner body — everything below remounts on rebindKey bump.
+        ScannerBody(
+            onCode = onCode,
+            active = active,
+            generation = rebindKey,
+            onStalled = {
+                if (rebindKey < MAX_REBINDS) {
+                    rebindKey++
+                } else {
+                    stalled = true // give up: surface a manual-restart hint
+                }
+            },
+            modifier = modifier
+        )
+    }
+
+    if (stalled) {
+        Column(
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Camera stalled", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    stalled = false
+                    rebindKey = 0
+                }
+            ) { Text("Restart camera") }
+        }
+    }
+}
+
+@Composable
+private fun ScannerBody(
+    onCode: (String) -> Unit,
+    active: Boolean,
+    generation: Int,
+    onStalled: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -365,11 +427,30 @@ private fun CameraScanner(
     }
     val paused = remember { AtomicBoolean(false) }
     val lastDecode = remember { AtomicLong(0L) }
+    // Touched by EVERY arriving frame (not gated ones) — the stall watchdog's
+    // liveness signal. Init = bind time so a never-started stream trips it too.
+    val lastFrameSeen = remember { AtomicLong(System.currentTimeMillis()) }
 
     // The analysis gate follows verification: paused while [isVerifying] runs,
     // re-armed when verification settles (error paths included) so a rejected
     // scan doesn't leave the scanner dead.
     LaunchedEffect(active) { paused.set(!active) }
+
+    // Stall watchdog: while the camera SHOULD be streaming (QR mode, not
+    // verifying), wake up every 2 s and check frame freshness. A gap longer
+    // than WATCHDOG_TIMEOUT_MS means the HAL stopped delivering frames →
+    // report to the parent for a full remount.
+    LaunchedEffect(active, generation) {
+        while (isActive) {
+            delay(2_000L)
+            if (!active || paused.get()) continue
+            val gap = System.currentTimeMillis() - lastFrameSeen.get()
+            if (gap > WATCHDOG_TIMEOUT_MS) {
+                onStalled()
+                break
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -397,6 +478,9 @@ private fun CameraScanner(
             .build()
             .apply {
                 setAnalyzer(executor) { proxy ->
+                    // Liveness FIRST — every arriving frame (even gated ones)
+                    // feeds the watchdog before any early-return.
+                    lastFrameSeen.set(System.currentTimeMillis())
                     try {
                         if (paused.get()) return@setAnalyzer
                         val now = System.currentTimeMillis()
@@ -455,6 +539,13 @@ private fun CameraScanner(
 }
 
 private const val DECODE_COOLDOWN_MS = 2_500L
+
+// Stall watchdog: 6 s without a delivered frame = the stream is dead
+// (healthy streams deliver at 15–30 fps; the MIUI stall shows one frozen
+// frame and nothing further). Retry budget stops a hot rebind loop if the
+// HAL is genuinely wedged — after 3 remounts the UI asks for a manual restart.
+private const val WATCHDOG_TIMEOUT_MS = 6_000L
+private const val MAX_REBINDS = 3
 
 private enum class PermissionState { PENDING, GRANTED, DENIED }
 
