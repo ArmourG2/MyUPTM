@@ -26,6 +26,12 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // Sprint 12: ML Kit ships native decoder libs for 4 ABIs — the POC
+        // targets real devices only (arm64), so don't bloat the APK.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Sprint 8 Task 3: Cloudinary config is injected from local.properties so the
@@ -79,7 +85,11 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.material.icons)
-    implementation(libs.androidx.compose.material.icons.extended)
+    // Sprint 12 audit: material-icons-extended (≈35 MB of dex) was removed —
+    // every used icon resolves from the core set; see icons in BottomNavBar,
+    // ClassManagement, AdminDashboard, Attendance (QR/NoPhotography).
+    // If a future icon is core-metadata-only, re-add extended OR a drawable.
+    // implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.datastore.preferences)
 
@@ -101,7 +111,15 @@ dependencies {
     implementation(libs.credentials.play.services.auth)
     implementation(libs.googleid)
 
-    // Sprint 11: QR attendance — generate the session QR (lecturer) + scan it (student).
+    // Sprint 11: QR attendance — zxing core generates the session QR (lecturer side).
+    // Sprint 12: the student side scans in-app with CameraX + ML Kit (no zxing Activity).
     implementation(libs.zxing.core)
-    implementation(libs.zxing.android.embedded)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.viewfinder.compose)
+    implementation(libs.mlkit.barcode.scanning)
+
+    // Sprint 12: theme-colour picker — M3 scheme generation from a seed colour.
+    implementation(libs.material.kolor)
 }

@@ -9,6 +9,7 @@ import com.myuptm.data.repository.DataStoreSettingsRepository
 import com.myuptm.domain.model.AppFont
 import com.myuptm.domain.model.AppSettings
 import com.myuptm.domain.model.ThemeMode
+import com.myuptm.domain.model.ThemePalette
 import com.myuptm.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,10 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
 
     fun updateAppFont(font: AppFont) {
         viewModelScope.launch { repository.updateAppFont(font) }
+    }
+
+    fun updateThemePalette(palette: ThemePalette) {
+        viewModelScope.launch { repository.updateThemePalette(palette) }
     }
 
     /**

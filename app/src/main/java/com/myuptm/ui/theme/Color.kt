@@ -5,6 +5,14 @@ import androidx.compose.ui.graphics.Color
 // MyUPTM Blue palette — Light theme
 val BluePrimary = Color(0xFF1565C0)
 val BlueOnPrimary = Color(0xFFFFFFFF)
+
+// Sprint 12: fixed seed palettes for the Settings theme-colour picker.
+// The full M3 schemes (all containers/tiers, both themes) are generated
+// from these seeds at runtime — see Theme.kt / material-kolor.
+val PaletteTealSeed = Color(0xFF00897B)
+val PalettePurpleSeed = Color(0xFF7C4DFF)
+val PaletteGreenSeed = Color(0xFF388E3C)
+val PaletteOrangeSeed = Color(0xFFEF6C00)
 val BluePrimaryContainer = Color(0xFFD6E3FF)
 val BlueOnPrimaryContainer = Color(0xFF001C3A)
 

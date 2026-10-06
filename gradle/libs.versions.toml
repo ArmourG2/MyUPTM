@@ -16,7 +16,9 @@ credentials = "1.6.0"
 googleid = "1.2.1"
 googleServices = "4.5.0"
 zxingCore = "3.5.3"
-zxingEmbedded = "4.3.0"
+camerax = "1.6.2"
+mlkitBarcode = "17.3.0"
+materialKolor = "5.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -46,10 +48,20 @@ firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore
 credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
-# Sprint 11: QR attendance — zxing core renders the QR bitmap (lecturer side);
-# zxing-android-embedded provides the drop-in scan Activity (student side).
+# Sprint 11: QR attendance — zxing core renders the QR bitmap (lecturer side).
+# Sprint 12: student scanning moved in-app (CameraX preview + ML Kit decode);
+# zxing-android-embedded (drop-in scan Activity) was removed with that flow.
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
-zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingEmbedded" }
+
+# Sprint 12: embedded attendance scanner (student side).
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-viewfinder-compose = { group = "androidx.camera", name = "camera-compose", version.ref = "camerax" }
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcode" }
+
+# Sprint 12: theme-colour picker — full M3 schemes generated from a seed colour.
+material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 
 
 [plugins]

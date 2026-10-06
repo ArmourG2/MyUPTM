@@ -1,12 +1,19 @@
 package com.myuptm.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceRequest
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.compose.CameraXViewfinder
+import androidx.camera.lifecycle.awaitInstance
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,13 +25,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,6 +44,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,22 +53,38 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
 import com.myuptm.viewmodel.AttendanceCheckInViewModel
-import kotlinx.coroutines.launch
+import com.myuptm.viewmodel.AttendanceCheckInViewModel.CheckInUiState
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
-// Sprint 11: REAL attendance verification — the student either scans the
-// lecturer's QR (payload = the 6-digit session code) or types the PIN; both run
-// the same check against the active 5-minute Firestore session. Scanning uses
-// the zxing embedded Activity (no in-app camera preview to maintain).
+// Sprint 12: the attendance tab IS the scanner. The camera preview is embedded
+// (CameraX + ML Kit) and starts the moment the student opens the tab in QR
+// mode — no separate zxing Activity, the app never leaves the screen. The
+// backend check-in path (Suspense 11) is unchanged: payload/typed PIN →
+// AttendanceCheckInViewModel.verify against the 5-minute Firestore session.
 @Composable
 fun AttendanceScreen() {
     var isQrMode by remember { mutableStateOf(true) }
@@ -72,23 +92,6 @@ fun AttendanceScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
     val checkInViewModel: AttendanceCheckInViewModel = viewModel()
     val uiState by checkInViewModel.uiState.collectAsState()
-
-    // zxing's CaptureActivity handles its own camera permission + preview UI;
-    // we only receive the decoded payload here.
-    val scanLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        ScanContract()
-    ) { result ->
-        result.contents?.let { contents -> checkInViewModel.verify(contents) }
-    }
-
-    fun launchScanner() {
-        val options = ScanOptions()
-            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("Scan the attendance code shown by your lecturer")
-            .setBeepEnabled(false)
-            .setOrientationLocked(true)
-        scanLauncher.launch(options)
-    }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
         Column(
@@ -98,7 +101,7 @@ fun AttendanceScreen() {
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
             Text("Attendance Verification", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(4.dp))
             Text(
@@ -109,96 +112,37 @@ fun AttendanceScreen() {
 
             Spacer(Modifier.height(16.dp))
 
-            // Animated centre area: QR and PIN swap in the same slot
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                AnimatedVisibility(
-                    visible = uiState.verifiedSession != null,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    VerifiedPanel(
-                        displayCode = uiState.verifiedSession?.displayCode.orEmpty(),
-                        verifiedAt = uiState.verifiedAt,
-                        onDone = { checkInViewModel.consumeResult() }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = uiState.verifiedSession == null && isQrMode,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.QrCodeScanner,
-                            contentDescription = null,
-                            modifier = Modifier.size(84.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            "Scan the QR shown on the lecturer's screen",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = { launchScanner() }, enabled = !uiState.isVerifying) {
-                            if (uiState.isVerifying) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Text("Scan QR code")
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = uiState.verifiedSession == null && !isQrMode,
-                    enter = fadeIn() + slideInVertically { it / 4 } + expandVertically(),
-                    exit = fadeOut() + slideOutVertically { it / 4 } + shrinkVertically()
-                ) {
-                    PinEntry(
-                        pin = pin,
-                        onPinChange = { pin = it },
-                        isVerifying = uiState.isVerifying,
-                        onSubmit = {
-                            checkInViewModel.verify(pin)
-                            pin = ""
-                        }
-                    )
-                }
-
-                uiState.error?.let { message ->
-                    Spacer(Modifier.height(14.dp))
-                    Text(
-                        message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-
-            AttendanceModeToggle(isQrMode = isQrMode, onModeChange = { isQrMode = it })
-            Spacer(Modifier.height(16.dp))
+            // The stage: live camera (QR mode) / PIN entry / confirmation panel.
+            ScannerStage(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                isQrMode = isQrMode,
+                onModeChange = {
+                    isQrMode = it
+                    if (it) checkInViewModel.consumeResult() // clear stale errors/mocks
+                },
+                state = uiState,
+                pin = pin,
+                onPinChange = { value ->
+                    // Self-filtering input: digits only, max 6
+                    if (value.length <= 6 && value.all { it.isDigit() }) pin = value
+                },
+                onPinSubmit = {
+                    checkInViewModel.verify(pin)
+                    pin = ""
+                },
+                onScanCode = { payload -> checkInViewModel.verify(payload) },
+                onDone = { checkInViewModel.consumeResult() }
+            )
 
             // Recent verifications (proof panel) — newest first, capped at 3.
             if (uiState.myCheckIns.isNotEmpty() && uiState.verifiedSession == null) {
+                Spacer(Modifier.height(12.dp))
                 Text(
                     "Recent verifications",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 uiState.myCheckIns.take(3).forEach { checkIn ->
                     Row(
                         modifier = Modifier
@@ -226,9 +170,296 @@ fun AttendanceScreen() {
                         )
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+
+    // Errors (expired code, unknown code, network) surface as a snackbar so the
+    // camera keeps running underneath — the student can scan the next code
+    // without re-entering anything.
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { snackbarHostState.showSnackbar(it) }
+    }
+}
+
+@Composable
+private fun ScannerStage(
+    modifier: Modifier = Modifier,
+    isQrMode: Boolean,
+    onModeChange: (Boolean) -> Unit,
+    state: CheckInUiState,
+    pin: String,
+    onPinChange: (String) -> Unit,
+    onPinSubmit: () -> Unit,
+    onScanCode: (String) -> Unit,
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
+    var permissionState by remember { mutableStateOf(PermissionState.PENDING) }
+
+    // Auto-open (owner decision, Sprint 12): the camera permission is requested
+    // the moment the student lands on the tab so the live preview starts with
+    // zero taps. Persisted grant is reused; a denial falls to the retry panel.
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        permissionState = if (granted) PermissionState.GRANTED else PermissionState.DENIED
+    }
+    LaunchedEffect(Unit) {
+        permissionState = if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) PermissionState.GRANTED else PermissionState.PENDING
+        if (permissionState == PermissionState.PENDING) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    val stageShape = RoundedCornerShape(24.dp)
+    Box(
+        modifier = modifier
+            .clip(stageShape)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+    ) {
+        val hasPermission = permissionState == PermissionState.GRANTED
+        when {
+            // Green confirmation — replaces the viewfinder; camera is unbound.
+            state.verifiedSession != null -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    VerifiedPanel(
+                        displayCode = state.verifiedSession.displayCode,
+                        verifiedAt = state.verifiedAt,
+                        onDone = onDone
+                    )
+                }
+            }
+
+            // PIN mode — the camera is NOT bound (no indicator light, no drain).
+            !isQrMode -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    // Sprint 12: vector drawable (material-icons-extended removed).
+                    Icon(
+                        ImageVector.vectorResource(com.myuptm.R.drawable.ic_qr_code_scanner),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(56.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    PinEntry(
+                        pin = pin,
+                        onPinChange = onPinChange,
+                        isVerifying = state.isVerifying,
+                        onSubmit = onPinSubmit
+                    )
+                }
+            }
+
+            // QR mode + permission granted — the LIVE scanner (stays mounted
+            // through the verifying window; [paused] gates frame analysis).
+            hasPermission -> CameraScanner(
+                onCode = onScanCode,
+                active = !state.isVerifying,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Permission denied — retry panel; PIN stays one tap away.
+            permissionState == PermissionState.DENIED -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    // Sprint 12: vector drawable (material-icons-extended removed).
+                    Icon(
+                        ImageVector.vectorResource(com.myuptm.R.drawable.ic_no_photography),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(56.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text("Camera access is needed to scan the QR", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Or switch to the PIN below and type the code.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                        Text("Retry camera")
+                    }
+                }
+            }
+
+            // Waiting on the permission dialog.
+            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
         }
+
+        // Viewfinder furniture — brackets + caption, only while scanning camera-side.
+        if (isQrMode && state.verifiedSession == null && hasPermission) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CornerBracketFrame(size = 240.dp, modifier = Modifier.size(240.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Point camera at QR code",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White
+                )
+            }
+        }
+
+        // Mode toggle rides at the bottom edge of the stage (mock-referenced).
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp)
+        ) {
+            AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
+        }
+    }
+}
+
+// The live decoder: binds Preview + ImageAnalysis to the owner's lifecycle for
+// as long as this composable exists; ML Kit scans every third QR frame-class
+// image (keep-only-latest) and pushes payloads up through [onCode]. Governor:
+// a 2.5 s cooldown between decodes so one frame never double-fires a verify,
+// plus a pause flag while a verification is in flight.
+@Composable
+private fun CameraScanner(
+    onCode: (String) -> Unit,
+    active: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var surfaceRequest by remember { mutableStateOf<SurfaceRequest?>(null) }
+    val executor = remember { Executors.newSingleThreadExecutor() }
+    val scanner = remember {
+        BarcodeScanning.getClient(
+            BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build()
+        )
+    }
+    val paused = remember { AtomicBoolean(false) }
+    val lastDecode = remember { AtomicLong(0L) }
+
+    // The analysis gate follows verification: paused while [isVerifying] runs,
+    // re-armed when verification settles (error paths included) so a rejected
+    // scan doesn't leave the scanner dead.
+    LaunchedEffect(active) { paused.set(!active) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            paused.set(true)
+            runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
+            runCatching { scanner.close() }
+            executor.shutdown()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val provider = ProcessCameraProvider.awaitInstance(context)
+        val preview = Preview.Builder().build().apply {
+            setSurfaceProvider { request -> surfaceRequest = request }
+        }
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+            .apply {
+                setAnalyzer(executor) { proxy ->
+                    try {
+                        if (paused.get()) return@setAnalyzer
+                        val now = System.currentTimeMillis()
+                        if (now - lastDecode.get() < DECODE_COOLDOWN_MS) return@setAnalyzer
+                        if (proxy.image != null) {
+                            val input = InputImage.fromMediaImage(
+                                proxy.image!!,
+                                proxy.imageInfo.rotationDegrees
+                            )
+                            val codes = runCatching { Tasks.await(scanner.process(input)) }
+                                .getOrDefault(emptyList())
+                            val payload = codes.firstOrNull()?.rawValue
+                            lastDecode.set(System.currentTimeMillis())
+                            if (!payload.isNullOrBlank()) {
+                                paused.set(true) // one scan = one check-in
+                                lastDecode.set(0L) // clear the cooldown gate
+                                executor.execute { onCode(payload) }
+                                return@setAnalyzer
+                            }
+                        }
+                    } finally {
+                        proxy.close()
+                    }
+                }
+            }
+        runCatching {
+            provider.unbindAll()
+            provider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                analysis
+            )
+        }
+        paused.set(false)
+    }
+
+    Box(modifier, contentAlignment = Alignment.Center) {
+        val request = surfaceRequest
+        if (request != null) {
+            CameraXViewfinder(surfaceRequest = request, modifier = Modifier.fillMaxSize())
+        } else {
+            CircularProgressIndicator()
+        }
+    }
+}
+
+private const val DECODE_COOLDOWN_MS = 2_500L
+
+private enum class PermissionState { PENDING, GRANTED, DENIED }
+
+// Corner-bracket viewfinder, mock-referenced: four L strokes on a transparent canvas.
+@Composable
+private fun CornerBracketFrame(size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(size)) {
+        val stroke = 5.dp.toPx()
+        val arm = 40.dp.toPx()
+        val color = Color.White.copy(alpha = 0.9f)
+        val style = Stroke(width = stroke, cap = StrokeCap.Round)
+        val w = this.size.width
+        val h = this.size.height
+
+        // Top-left: horizontal arm + vertical arm
+        drawLine(color, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(arm, 0f), stroke, StrokeCap.Round)
+        drawLine(color, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(0f, arm), stroke, StrokeCap.Round)
+        // Top-right
+        drawLine(color, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w - arm, 0f), stroke, StrokeCap.Round)
+        drawLine(color, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w, arm), stroke, StrokeCap.Round)
+        // Bottom-left
+        drawLine(color, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(arm, h), stroke, StrokeCap.Round)
+        drawLine(color, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(0f, h - arm), stroke, StrokeCap.Round)
+        // Bottom-right
+        drawLine(color, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w - arm, h), stroke, StrokeCap.Round)
+        drawLine(color, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w, h - arm), stroke, StrokeCap.Round)
     }
 }
 
@@ -314,20 +545,22 @@ private fun PinEntry(
         LaunchedEffect(Unit) { focusRequester.requestFocus() }
         OutlinedTextField(
             value = pin,
-            onValueChange = { value ->
-                // Self-filtering input: digits only, max 6
-                if (value.length <= 6 && value.all { it.isDigit() }) onPinChange(value)
-            },
+            onValueChange = onPinChange,
             label = { Text("6-digit PIN") },
             visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            keyboardActions = KeyboardActions(onDone = { onSubmit() }),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onSubmit() }),
             singleLine = true,
             modifier = Modifier
-                .widthIn(max = 220.dp)
+                .width(if (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 400) 200.dp else 220.dp)
                 .focusRequester(focusRequester)
         )
-        Button(onClick = onSubmit, enabled = pin.length == 6 && !isVerifying) {
+        Button(
+            onClick = onSubmit,
+            enabled = pin.length == 6 && !isVerifying
+        ) {
             Text(if (isVerifying) "Verifying..." else "Verify")
         }
     }

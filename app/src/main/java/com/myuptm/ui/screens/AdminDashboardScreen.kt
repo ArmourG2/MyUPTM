@@ -14,11 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Class
-import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
@@ -35,8 +31,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.myuptm.R
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.myuptm.domain.model.Post
@@ -88,17 +86,19 @@ fun AdminDashboardScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // ---- Overview tiles ----
+            // Sprint 12: vector drawables instead of material-icons-extended
+            // (the extended library costs ~35 MB of dex for 6 icons).
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatTile(
-                        icon = Icons.Filled.People,
+                        icon = ImageVector.vectorResource(R.drawable.ic_people),
                         label = "Students",
                         value = "${state.studentCount}",
                         note = "POC roster figure",
                         modifier = Modifier.weight(1f)
                     )
                     StatTile(
-                        icon = Icons.Filled.Badge,
+                        icon = ImageVector.vectorResource(R.drawable.ic_badge),
                         label = "Lecturers",
                         value = "${state.lecturerCount}",
                         note = "Live accounts",
@@ -109,14 +109,14 @@ fun AdminDashboardScreen(
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatTile(
-                        icon = Icons.Filled.Class,
+                        icon = ImageVector.vectorResource(R.drawable.ic_class),
                         label = "Classes",
                         value = "${state.classCount}",
                         note = "All programmes",
                         modifier = Modifier.weight(1f)
                     )
                     StatTile(
-                        icon = Icons.Filled.Mail,
+                        icon = ImageVector.vectorResource(R.drawable.ic_mail),
                         label = "Pending",
                         value = "${state.pendingAccounts.size}",
                         note = "Unassigned UPTM emails",

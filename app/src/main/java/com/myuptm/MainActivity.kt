@@ -56,7 +56,8 @@ class MainActivity : ComponentActivity() {
 
             MyUPTMTheme(
                 themeMode = settings.themeMode,
-                appFont = settings.appFont
+                appFont = settings.appFont,
+                themePalette = settings.themePalette
             ) {
                 MyUptmApp()
             }

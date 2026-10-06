@@ -114,7 +114,10 @@ fun BottomNavBar(
                     }
                 },
                 icon = { Icon(imageVector = item.icon, contentDescription = item.label) },
-                label = { Text(text = item.label) }
+                label = { Text(text = item.label) },
+                // Sprint 12: unselected tabs show icon only; the selected tab's icon
+                // rises and its label slides in — saves space on 5-tab small screens.
+                alwaysShowLabel = false
             )
         }
     }

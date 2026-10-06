@@ -13,3 +13,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Sprint 12 hygiene: build artifacts never belong in git
+app/build/
+app/release/
+app/debug/
+unnamed.patch
+.idea/shelf/

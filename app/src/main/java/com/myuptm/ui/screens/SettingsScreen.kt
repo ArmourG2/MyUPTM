@@ -37,6 +37,7 @@ import com.myuptm.BuildConfig
 import com.myuptm.ui.components.FontPickerRow
 import com.myuptm.ui.components.SettingsSectionHeader
 import com.myuptm.ui.components.ThemeModeRow
+import com.myuptm.ui.components.ThemePaletteRow
 import com.myuptm.viewmodel.SettingsViewModel
 
 
@@ -77,6 +78,11 @@ fun SettingsScreen(
             ThemeModeRow(
                 themeMode = settings.themeMode,
                 onThemeModeSelected = viewModel::updateThemeMode
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            ThemePaletteRow(
+                themePalette = settings.themePalette,
+                onPaletteSelected = viewModel::updateThemePalette
             )
             Spacer(modifier = Modifier.height(16.dp))
             FontPickerRow(
