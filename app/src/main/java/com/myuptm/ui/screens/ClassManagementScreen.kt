@@ -140,10 +140,14 @@ fun ClassManagementScreen(
             viewModel.rosterFor(session, letters).find { it.matric.matchesMatric(matric) }
         }
     }
-    var showAddDialog by remember { mutableStateOf(false) }
+    // Sprint 13D: class add/edit/remove moved ONTO the Timetable (tap slot =
+    // editor; empty area = prefilled add) — Class Management stays a directory
+    // + roster/letter management, so it has no class CRUD affordance anymore.
+    var declineLetter by remember { mutableStateOf<AbsenceLetter?>(null) }
+    // Sprint 13D fix: CUSTOM-class rows regain Edit + Delete (owner rules);
+    // presets stay read-only (manage on the Timetable).
     var editingSession by remember { mutableStateOf<ClassSession?>(null) }
     var deletingSession by remember { mutableStateOf<ClassSession?>(null) }
-    var declineLetter by remember { mutableStateOf<AbsenceLetter?>(null) }
 
     LaunchedEffect(status) {
         if (status != null) {
@@ -225,10 +229,13 @@ fun ClassManagementScreen(
                     searchText = searchText,
                     selectedLevel = selectedLevel,
                     ownerEmail = ownerEmail,
-                    canModify = viewModel::canModify,
                     onSearchChange = { searchText = it },
                     onLevelChange = { selectedLevel = it },
                     onClassClick = { rosterClassId = it.id },
+                    // Sprint 13D fix (owner): CUSTOM classes (lecturer-created) can
+                    // be edited/deleted here again — CUSTOM classes are assumed
+                    // ONE-TIME unless the repeat rule says otherwise. Faculty
+                    // presets stay read-only (manage on the Timetable).
                     onEdit = { editingSession = it },
                     onDelete = { deletingSession = it },
                     hasClasses = weeklyClasses.any { it.isNotEmpty() }
@@ -237,34 +244,13 @@ fun ClassManagementScreen(
         }
 
         if (rosterClass == null) {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Add class")
-            }
+            // Sprint 13D: no add-class FAB here — the timetable owns class CRUD
+            // (tap a class to edit, empty area to add; removals are per-week).
+            Spacer(Modifier.height(0.dp))
         }
     }
 
-    if (showAddDialog) {
-        ClassEditorDialog(
-            title = "Add class",
-            initial = null,
-            errorMessage = status,
-            onDismiss = {
-                showAddDialog = false
-                viewModel.clearStatus()
-            },
-            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image ->
-                viewModel.addClass(subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image)
-                // Validation errors stay in the dialog via status; success closes it.
-                if (viewModel.status.value == null) showAddDialog = false
-            }
-        )
-    }
-
+    // Sprint 13D fix: CUSTOM-class editor (repeat rule editable) + delete confirm.
     editingSession?.let { session ->
         ClassEditorDialog(
             title = "Edit class",
@@ -274,8 +260,8 @@ fun ClassManagementScreen(
                 editingSession = null
                 viewModel.clearStatus()
             },
-            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image ->
-                viewModel.updateClass(session, subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image)
+            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image, slotDate, weeks ->
+                viewModel.updateClass(session, subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image, slotDate, weeks)
                 if (viewModel.status.value == null) editingSession = null
             }
         )
@@ -374,10 +360,10 @@ private fun ClassListView(
     searchText: String,
     selectedLevel: ClassLevel?,
     ownerEmail: String?,
-    canModify: (ClassSession, String?) -> Boolean,
     onSearchChange: (String) -> Unit,
     onLevelChange: (ClassLevel?) -> Unit,
     onClassClick: (ClassSession) -> Unit,
+    // Sprint 13D fix: CUSTOM rows edit/delete; presets read-only.
     onEdit: (ClassSession) -> Unit,
     onDelete: (ClassSession) -> Unit,
     hasClasses: Boolean
@@ -436,7 +422,9 @@ private fun ClassListView(
             items(filtered, key = { it.id }) { session ->
                 ClassManagementCard(
                     session = session,
-                    canModify = canModify(session, ownerEmail),
+                    canModify = session.ownerEmail == ownerEmail,
+                    isCustom = session.isCustom,
+                    repeatLabel = session.repeatRuleLabel,
                     onClick = { onClassClick(session) },
                     onEdit = { onEdit(session) },
                     onDelete = { onDelete(session) }
@@ -450,6 +438,9 @@ private fun ClassListView(
 private fun ClassManagementCard(
     session: ClassSession,
     canModify: Boolean,
+    // Sprint 13D: CUSTOM-only edit/delete affordances.
+    isCustom: Boolean,
+    repeatLabel: String,
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -482,6 +473,9 @@ private fun ClassManagementCard(
                         l.name.lowercase().replaceFirstChar { it.uppercase() }
                     })
                     if (session.teachingMedium == TeachingMedium.ONLINE) append(" · Online")
+                    // Sprint 13D: the repeat-rule tag tells the lecturer what
+                    // students will see (this week only / N weeks / every week).
+                    if (session.isCustom) append(" · CUSTOM (${session.repeatRuleLabel})")
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -506,13 +500,23 @@ private fun ClassManagementCard(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                if (canModify) {
-                    IconButton(onClick = onEdit) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Edit class")
+                when {
+                    // Sprint 13D fix: CUSTOM rows regain edit + delete (the repeat
+                    // rule tag tells the lecturer what the students will see);
+                    // faculty presets stay read-only ("Manage on Timetable").
+                    session.isCustom -> {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit class")
+                        }
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Remove class")
+                        }
                     }
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Remove class")
-                    }
+                    canModify -> Text(
+                        "Manage on Timetable",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -537,7 +541,8 @@ private fun StudentRosterView(
     onWarnRed: (List<RosterStudent>) -> Unit,
     onEndAttendance: () -> Unit
 ) {
-    val redStudents = students.filter { it.missed >= 5 }
+    // Sprint 13D: hours-based severity (>= 5 missed hours = red).
+    val redStudents = students.filter { it.severity == 2 }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
@@ -769,7 +774,8 @@ private fun StudentLetterReview(
     onWarnStudent: () -> Unit = {},
     onViewAttendance: () -> Unit = {}
 ) {
-    val redOnly = student.missed >= 5
+    // Sprint 13D: hours-based severity (>= 5 missed hours = red).
+    val redOnly = student.severity == 2
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -849,7 +855,7 @@ private fun StudentLetterReview(
             }
         }
 
-        // Sprint 8 Task 5: warning entry — RED students only (missed >= 5).
+        // Sprint 8 Task 5: warning entry — RED students only (Sprint 13D: >= 5 missed hours).
         if (redOnly) {
             TextButton(onClick = onWarnStudent, modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -984,9 +990,24 @@ private fun RejectionDetailDialog(
 }
 
 @Composable
-private fun ClassEditorDialog(
+internal fun ClassEditorDialog(
     title: String,    initial: ClassSession?,
+    // Sprint 13D: timetable empty-slot adds prefill day + times here.
+    defaultDayIndex: Int = 0,
+    defaultStart: String = "09:00",
+    defaultEnd: String = "10:00",
+    // Sprint 13D: the anchor the custom class runs from (tapped slot date /
+    // the edited class's own date). Null only for faculty presets.
+    anchorDate: java.time.LocalDate? = null,
     errorMessage: String?,
+    // Sprint 13D: removal actions for lecturers, context-dependent:
+    //  - onRemoveForWeek(reason) cancels a RECURRING class for one week
+    //    (global grey-out + automatic student notification, preset unless a
+    //    reason is stated — the dialog's reason field IS that reason).
+    //  - onReinstateForWeek flips a already-cancelled week back on.
+    onRemoveForWeek: ((reason: String?) -> Unit)? = null,
+    onReinstateForWeek: (() -> Unit)? = null,
+    isCancelledForWeek: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (
         subject: String,
@@ -999,18 +1020,31 @@ private fun ClassEditorDialog(
         levels: List<ClassLevel>,
         attention: Boolean,
         reason: String?,
-        imageUri: android.net.Uri?
+        imageUri: android.net.Uri?,
+        // Sprint 13D: the repeat-rule payload. slotDate = the anchor date passed
+        // in (tapped slot / the custom class's own date); weeks: null = every
+        // week, 1 = this week only, 2–14 = a couple of weeks.
+        slotDate: java.time.LocalDate?,
+        weeks: Int?
     ) -> Unit
 ) {
     var subject by remember { mutableStateOf(initial?.subjectName ?: "") }
     var venue by remember { mutableStateOf(initial?.venue ?: "") }
     var start by remember {
-        mutableStateOf(initial?.startTime ?: "09:00")
-    }
+        mutableStateOf(initial?.startTime ?: defaultStart)    }
     var end by remember {
-        mutableStateOf(initial?.endTime ?: "10:00")
+        mutableStateOf(initial?.endTime ?: defaultEnd)
     }
-    var dayIndex by remember { mutableStateOf(initial?.dayIndex ?: 0) }
+    var dayIndex by remember { mutableStateOf(initial?.dayIndex ?: defaultDayIndex) }
+    // Sprint 13D repeat rule (owner rules): custom classes default to
+    // "This week only"; toggles for EVERY WEEK and a weeks stepper (1–14,
+    // semester is 14 weeks).
+    val anchor = remember(initial, anchorDate) {
+        anchorDate ?: initial?.date?.let { java.time.LocalDate.ofEpochDay(it) } ?: java.time.LocalDate.now()
+    }
+    var ruleOnce by remember(initial) { mutableStateOf(initial?.date != null && (initial?.weeks ?: 1) <= 1) }
+    var ruleEveryWeek by remember(initial) { mutableStateOf(initial?.date == null && initial?.ownerEmail != null) }
+    var weeksCount by remember(initial) { mutableStateOf((initial?.weeks ?: 2).coerceIn(2, 14)) }
     var medium by remember { mutableStateOf(initial?.teachingMedium ?: TeachingMedium.OFFLINE) }
     var section by remember { mutableStateOf(initial?.section ?: "") }
     var levels by remember {
@@ -1065,6 +1099,62 @@ private fun ClassEditorDialog(
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
+                }
+
+                // Sprint 13D: repeat-rule chips (owner rules — University timetables
+                // may move once or twice per 14-week semester; week count via
+                // stepper). Only shown for CUSTOM classes (faculty presets have
+                // no rule choice).
+                if (initial?.ownerEmail != null || initial == null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = ruleOnce,
+                            onClick = { ruleOnce = true; ruleEveryWeek = false },
+                            label = { Text("This week only") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = !ruleOnce && !ruleEveryWeek,
+                            onClick = { ruleEveryWeek = false; ruleOnce = false },
+                            label = { Text("Weeks…") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = ruleEveryWeek,
+                            onClick = { ruleEveryWeek = true; ruleOnce = false },
+                            label = { Text("Every week") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (!ruleOnce && !ruleEveryWeek) {
+                        // Range stepper (2..14 weeks; the semester is 14 weeks).
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            IconButton(onClick = { weeksCount = weeksCount.dec().coerceIn(2, 14) }) {
+                                Text(
+                                    "−",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                if (weeksCount == 1) "1 week" else "$weeksCount weeks",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            IconButton(onClick = { weeksCount = weeksCount.inc().coerceIn(2, 14) }) {
+                                Icon(Icons.Filled.Add, contentDescription = "More weeks")
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "from ${java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.getDefault()).format(anchor)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 // Row 2: programme level chips (MULTI-select — merged classes like
@@ -1211,6 +1301,23 @@ private fun ClassEditorDialog(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    when {
+                        // Already-cancelled week → offer to bring it back.
+                        onReinstateForWeek != null && isCancelledForWeek -> {
+                            TextButton(onClick = onReinstateForWeek) {
+                                Text("Reinstate for this week")
+                            }
+                            Spacer(Modifier.weight(1f))
+                        }
+                        // Recurring class → cancel for THIS WEEK only (grey-out
+                        // for everyone + automatic notification).
+                        onRemoveForWeek != null -> {
+                            TextButton(onClick = { onRemoveForWeek(reason.trim().ifBlank { null }) }) {
+                                Text("Remove for this week", color = MaterialTheme.colorScheme.error)
+                            }
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Spacer(Modifier.width(8.dp))
                     TextButton(onClick = {
@@ -1229,7 +1336,17 @@ private fun ClassEditorDialog(
                         }
                         onSave(
                             subject, venue, dayIndex, start, end, medium, section, levels.toList(),
-                            attention, reason.trim().ifBlank { null }, selectedImage
+                            attention, reason.trim().ifBlank { null }, selectedImage,
+                            // Sprint 13D: repeat-rule payload — custom anchor + weeks.
+                            when {
+                                ruleEveryWeek -> null
+                                else -> anchor
+                            },
+                            when {
+                                ruleEveryWeek -> null
+                                ruleOnce -> 1
+                                else -> weeksCount
+                            }
                         )
                     }) { Text("Save") }
                 }

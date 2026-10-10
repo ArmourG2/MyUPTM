@@ -65,24 +65,23 @@ fun ProfileScreen(navController: NavController, profileViewModel: ProfileViewMod
         uri?.let { profileViewModel.uploadAvatar(it) }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Profile",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Column(modifier = Modifier.fillMaxSize()) {
+            com.myuptm.ui.components.CampusHeroHeader(
+                title = "Profile",
+                subtitle = "Account & academic overview",
+                actions = {
+                    IconButton(onClick = { navController.navigate(MyUptmRoutes.SETTINGS) }) {
+                        Icon(
+                            Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            tint = androidx.compose.ui.graphics.Color.White
+                        )
+                    }
+                }
             )
-            IconButton(onClick = { navController.navigate(MyUptmRoutes.SETTINGS) }) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings")
-            }
-        }
-
 
         if (profile == null) {
             Box(
@@ -221,6 +220,7 @@ fun ProfileScreen(navController: NavController, profileViewModel: ProfileViewMod
                 }
                 Spacer(Modifier.height(32.dp))
             }
+        }
         }
     }
 }

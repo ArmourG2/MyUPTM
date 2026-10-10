@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -74,6 +75,14 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private val _identity = MutableStateFlow(InboxIdentity(null, false, false, false, null, false))
+
+    // Sprint 14 (owner ask): fresh registrations (no classes yet) must NOT receive
+    // CLASS_UPDATE timetable news. The nav-upgrade flag (sticky DataStore, see
+    // StudentNavViewModel) decides; re-read when the collector re-runs.
+    @Volatile
+    private var studentEngaged: Boolean = true
+    @Volatile
+    private var studentRoleActive: Boolean = false
 
     // Docs already present on the first snapshot are history — never re-notify for them.
     private val seenIds = mutableSetOf<String>()
@@ -159,7 +168,8 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                     visibleToMe(docs, _identity.value)
                         .filter {
                             it.id !in seenIds && it.type != NotificationType.CLASH_WARNING &&
-                                isNewsworthy(it, _identity.value)
+                                isNewsworthy(it, _identity.value) &&
+                                classUpdateStudentFilter(it)
                         }
                         .forEach { notification ->
                             NotificationHelper.show(
@@ -173,29 +183,55 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                 seenIds.addAll(docs.map { it.id })
             }
         }
-        // Sprint 9 (tier rule): a RED letter stays pinned UNTIL the student uploads.
-        // Every newly submitted (not-declined) letter automatically resolves all
-        // important notifications for the demo student.
+        // Sprint 9 (tier rule): a RED letter stays pinned UNTIL the student's
+        // extra-proof is resolved — every newly SUBMITTED (not-declined) letter
+        // resolves the pinned items for the demo alias.
+        // Sprint 14 FIX: for REAL students this resolution never fired (the
+        // counter above only looks at the demo matric), so a warning letter
+        // stayed pinned even after the lecturer APPROVED the student's letter.
+        // Now: when the count of MY APPROVED letters grows, all IMPORTANT docs
+        // TARGETED at me (my warning letters) are resolved from the inbox.
         val lettersRepository: AbsenceLetterRepository = FirestoreAbsenceLetterRepository()
         viewModelScope.launch {
             var previousExcused = 0
+            var previousApproved = 0
             lettersRepository.observeLetters().collect { letters ->
                 val identity = _identity.value
+                if (!identity.isStudent) return@collect
                 val excused = letters.count {
                     it.studentMatric.matchesMatric(MockAttendanceRoster.DEMO_MATRIC) &&
                         it.status != com.myuptm.domain.model.LetterStatus.DECLINED
                 }
-                if (identity.isStudent && excused > previousExcused && previousExcused >= 0) {
-                    val importantIds = rawList.value
-                        .filter { it.notificationTier() == NotificationTier.IMPORTANT }
-                        .map { it.id }
-                    if (importantIds.isNotEmpty()) {
-                        DataStoreInboxSeenRepository(getApplication(), identity.email ?: "")
-                            .markRead("letter-submission", importantIds)
-                    }
+                if (excused > previousExcused && previousExcused >= 0) {
+                    markImportantDocsResolved(targetedOnly = false)
+                }
+                // MY letters (matric-or-email match, same rule the inbox
+                // visibility uses): a NEW approval by the lecturer clears my
+                // targeted warning letters.
+                val myMatric = identity.myMatric
+                val approved = if (myMatric == null) 0 else letters.count {
+                    it.studentMatric.matchesMatric(myMatric) &&
+                        it.status == com.myuptm.domain.model.LetterStatus.APPROVED
+                }
+                if (approved > previousApproved && previousApproved >= 0) {
+                    // targetedOnly: never silence untargeted pinned posts —
+                    // only warning letters addressed to THIS student resolve.
+                    markImportantDocsResolved(targetedOnly = true)
                 }
                 previousExcused = excused
+                previousApproved = approved
             }
+        }
+    }
+
+    private suspend fun markImportantDocsResolved(targetedOnly: Boolean) {
+        val ids = rawList.value
+            .filter { it.notificationTier() == NotificationTier.IMPORTANT }
+            .filter { !targetedOnly || it.targetMatric != null }
+            .map { it.id }
+        if (ids.isNotEmpty()) {
+            DataStoreInboxSeenRepository(getApplication(), _identity.value.email ?: "")
+                .markRead("letter-submission", ids)
         }
     }
 
@@ -211,6 +247,12 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
     //  legacy docs that predate the `studentOnly` field.
     private fun isStudentAudience(n: AppNotification): Boolean =
         n.studentOnly || n.type == NotificationType.CLASS_UPDATE
+
+    // Sprint 14: class-update news (timetable changes) is only relevant to
+    // students who have (or had) classes. A fresh registration does not receive
+    // it until their first class appears (StudentNavViewModel marks the upgrade).
+    private fun classUpdateStudentFilter(n: AppNotification): Boolean =
+        !(studentRoleActive && !studentEngaged && n.type == NotificationType.CLASS_UPDATE)
 
     private fun visibleToMe(
         list: List<AppNotification>,
@@ -230,7 +272,8 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                 it.targetMatric == null ||
                     it.targetMatric.matchesMatric(identity.myMatric) ||
                     it.targetMatric.matchesMatric(MockAttendanceRoster.DEMO_MATRIC)
-                )
+                ) &&
+                classUpdateStudentFilter(it)
         }
     }
 
@@ -246,6 +289,7 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
             myMatric = null,
             loaded = false
         )
+        updateEngagement(user)
         if (user != null) {
             viewModelScope.launch {
                 val matric = profileRepository.getUserProfile().getOrNull()
@@ -259,6 +303,28 @@ class InboxViewModel(application: Application) : AndroidViewModel(application) {
                     loaded = true
                 )
             }
+        }
+    }
+
+    // Sprint 14: refreshes the engagement flags for the current student account
+    // (class-update news filtered while the account has no classes / not yet
+    // upgraded). Lecturers/admins are always engaged.
+    private fun updateEngagement(user: AppUser?) {
+        studentRoleActive = user?.role == UserRole.STUDENT
+        if (!studentRoleActive) {
+            studentEngaged = true
+            return
+        }
+        val email = user?.email ?: return
+        viewModelScope.launch {
+            val rosterEnrolled = com.myuptm.data.repository.MockAttendanceRoster.isEnrolledDemoStudent(
+                user.studentId, user.email
+            )
+            studentEngaged = rosterEnrolled ||
+                com.myuptm.data.repository.DataStoreStudentNavRepository(
+                    getApplication(), email
+                ).observeUpgraded().first()
+            // Also re-checked once per rebind (rebind happens on app open).
         }
     }
 

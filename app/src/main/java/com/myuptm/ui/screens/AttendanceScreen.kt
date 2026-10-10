@@ -75,6 +75,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -195,6 +196,14 @@ fun AttendanceScreen() {
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
+            // Campus photo under a heavy surface wash — shows through only in
+            // the non-camera states, fading out in lockstep with the feed's
+            // scrim so the scanner experience is untouched.
+            com.myuptm.ui.components.CampusMistBackdrop(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = 1f - scrimAlpha }
+            )
             ScannerStage(
                 modifier = Modifier.fillMaxSize(),
                 isQrMode = isQrMode,
@@ -298,8 +307,10 @@ private fun ScannerStage(
         else -> Stage.PENDING
     }
     Box(
+        // Transparent in every state — the camera feed (live) or the misted
+        // campus backdrop (all other states) shows through from behind.
         modifier = modifier
-            .background(if (overFeed) Color.Transparent else MaterialTheme.colorScheme.surface)
+            .background(Color.Transparent)
     ) {
         AnimatedContent(
             targetState = stage,
@@ -325,6 +336,9 @@ private fun ScannerStage(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
+                            // Opaque backing — covers any leftover camera
+                            // artifact while the scanner branch exits.
+                            .background(MaterialTheme.colorScheme.surface)
                             .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
@@ -460,7 +474,12 @@ private fun ScannerStage(
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 88.dp, start = 20.dp, end = 20.dp)
+                    // Recent strip rides ABOVE the toggle block; when session
+                    // discovery chips are up the whole bottom stack is taller.
+                    .padding(
+                        bottom = if (state.openSessions.isNotEmpty()) 132.dp else 88.dp,
+                        start = 20.dp, end = 20.dp
+                    )
                     .clip(RoundedCornerShape(16.dp))
                     .background(stripColor)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
@@ -520,6 +539,27 @@ private fun ScannerStage(
                 // inset, so no extra bar padding here — just a breathing gap.
                 .padding(bottom = 8.dp)
         ) {
+            // Sprint 13 (P1): session discovery — chips for sessions open NOW
+            // (latest first, up to 2); one tap checks in against that session.
+            // Furniture styling: dark over the feed, themed over plain surfaces.
+            state.openSessions.take(2).forEach { session ->
+                androidx.compose.material3.Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (overFeed) Color.Black.copy(alpha = 0.62f)
+                    else MaterialTheme.colorScheme.surfaceContainer,
+                    onClick = { onScanCode(session.code) },
+                    modifier = Modifier.padding(vertical = 4.dp)
+                ) {
+                    Text(
+                        "LIVE · ${session.displayCode} — tap to verify",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (overFeed) Color.White else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                    )
+                }
+            }
+            if (state.openSessions.isNotEmpty()) Spacer(Modifier.height(8.dp))
             AttendanceModeToggle(isQrMode = isQrMode, onModeChange = onModeChange)
         }
     }

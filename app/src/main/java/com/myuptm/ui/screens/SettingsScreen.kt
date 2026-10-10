@@ -1,6 +1,8 @@
 package com.myuptm.ui.screens
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,7 +48,8 @@ import com.myuptm.viewmodel.SettingsViewModel
 
 fun SettingsScreen(
     onSignOut: () -> Unit,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onHelpClick: () -> Unit = {}
 ) {
     val viewModel: SettingsViewModel = viewModel(
         viewModelStoreOwner = LocalContext.current as ViewModelStoreOwner,
@@ -55,19 +58,20 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsState()
     var showSignOutDialog by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Settings",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
                     }
-                },
-                windowInsets = WindowInsets(0, 0, 0, 0) // Sprint 3 nested-Scaffold fix: keep it
-            )
-        }
-    ) { innerPadding ->
+                )
+            }
+        ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -93,6 +97,20 @@ fun SettingsScreen(
             SettingsSectionHeader("About")
             AboutBlock()
 
+            SettingsSectionHeader("Help")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Button(
+                    onClick = onHelpClick
+                ) {
+                    Text("Open the help guide")
+                }
+            }
+
             SettingsSectionHeader("Account")
             Button(
                 onClick = { showSignOutDialog = true },
@@ -108,6 +126,7 @@ fun SettingsScreen(
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
     }
 
     if (showSignOutDialog) {

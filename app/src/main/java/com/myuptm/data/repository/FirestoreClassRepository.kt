@@ -107,7 +107,11 @@ class FirestoreClassRepository(
         "section" to section,
         "levels" to levels.map { it.name },
         "ownerEmail" to ownerEmail,
-        "updatedAt" to System.currentTimeMillis()
+        "updatedAt" to System.currentTimeMillis(),
+        // Sprint 13D: custom classes carry the anchor date + repeat rule
+        // (weeks: null = permanent/every-week, 1 = this week only, N = range).
+        "date" to date,
+        "weeks" to weeks
     )
 
     private fun DocumentSnapshot.toClassSession(): ClassSession? {
@@ -136,8 +140,52 @@ class FirestoreClassRepository(
                 )
             },
             ownerEmail = getString("ownerEmail"),
-            updatedAt = getLong("updatedAt")
+            updatedAt = getLong("updatedAt"),
+            date = getLong("date"),
+            weeks = getLong("weeks")?.toInt()
         )
+    }
+
+    // ---- Sprint 13D: class_cancellations (global per-week cancellations) ----
+    // A cancellation greys one recurring class out for ONE week for EVERYONE;
+    // the Firestore class record is never touched. Doc id is deterministic.
+    override fun observeClassCancellations(): Flow<Map<String, String?>> = callbackFlow {
+        val registration: ListenerRegistration = db.collection(CANCELLATIONS)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(emptyMap())
+                    return@addSnapshotListener
+                }
+                val entries = snapshot?.documents?.mapNotNull { doc ->
+                    val classId = doc.getString("classId") ?: return@mapNotNull null
+                    val weekStart = doc.getLong("weekStartEpochDay") ?: return@mapNotNull null
+                    "${classId}|$weekStart" to doc.getString("reason")
+                }?.toMap() ?: emptyMap()
+                trySend(entries)
+            }
+        awaitClose { registration.remove() }
+    }
+
+    override suspend fun cancelClassForWeek(
+        classId: String,
+        weekStartEpochDay: Long,
+        reason: String?,
+        lecturerEmail: String?
+    ): Result<Unit> {
+        val docId = "${classId}_${weekStartEpochDay}"
+        val data = mapOf(
+            "classId" to classId,
+            "weekStartEpochDay" to weekStartEpochDay,
+            "reason" to reason,
+            "lecturerEmail" to lecturerEmail,
+            "createdAt" to System.currentTimeMillis()
+        )
+        return db.collection(CANCELLATIONS).document(docId).set(data).awaitResult().map { }
+    }
+
+    override suspend fun reinstateClassForWeek(classId: String, weekStartEpochDay: Long): Result<Unit> {
+        val docId = "${classId}_${weekStartEpochDay}"
+        return db.collection(CANCELLATIONS).document(docId).delete().awaitResult().map { }
     }
 
     // Bridges Firebase Tasks into Kotlin coroutines (project pattern: no extra deps).
@@ -149,5 +197,6 @@ class FirestoreClassRepository(
 
     private companion object {
         const val COLLECTION = "classes"
+        const val CANCELLATIONS = "class_cancellations"
     }
 }

@@ -63,6 +63,29 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     val identityReady: StateFlow<Boolean> = _identityReady.asStateFlow()
 
 
+    // Sprint 14 (access rule): only UPTM addresses may use the app — staff
+    // (@uptm.edu.my) and students (@student.uptm.edu.my). Legacy exceptions:
+    // zjosh9053@gmail.com is a registered LECTURER, akmal2kembar@gmail.com is a
+    // registered ADMIN — both keep access before the rule existed.
+    private val legacyAccountEmails = setOf(
+        "zjosh9053@gmail.com",      // lecturer
+        "akmal2kembar@gmail.com"    // admin
+    )
+
+    private fun isAllowedEmail(email: String?): Boolean {
+        val e = email?.trim()?.lowercase() ?: return false
+        if (e in legacyAccountEmails) return true
+        return e.endsWith("@uptm.edu.my") || e.endsWith("@student.uptm.edu.my")
+    }
+
+    private fun rejectNonUptmEmail(email: String?) {
+        authRepository.signOut()
+        _errorMessage.value =
+            "Sign in with your UPTM email (@uptm.edu.my for staff or @student.uptm.edu.my for students)."
+        _authState.value = AuthState.ERROR
+    }
+
+
     fun signIn(activity: Activity) {
         viewModelScope.launch {
             _authState.value = AuthState.LOADING
@@ -87,6 +110,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val firebaseUser = userResult.getOrThrow()
+
+            // Sprint 14 (access rule): block 3rd-party emails BEFORE any
+            // user-doc lookup/registration — the pending-approval path used to
+            // accept any Gmail.
+            if (!isAllowedEmail(firebaseUser.email)) {
+                rejectNonUptmEmail(firebaseUser.email)
+                return@launch
+            }
 
             val recordResult = userRepository.fetchUser(firebaseUser.uid)
             if (recordResult.isFailure) {
@@ -175,6 +206,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 val uid = authRepository.currentUser!!.uid
                 val user = authRepository.currentUser!!
+                // Sprint 14 (access rule): a persisted non-UPTM session (from
+                // before the rule existed) is bounced on restart too.
+                if (!isAllowedEmail(user.email)) {
+                    rejectNonUptmEmail(user.email)
+                    _identityReady.value = true
+                    return@launch
+                }
                 val result = userRepository.fetchUser(uid)
                 result.onSuccess { record ->
                     when {

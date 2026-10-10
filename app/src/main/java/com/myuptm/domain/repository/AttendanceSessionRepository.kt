@@ -11,6 +11,10 @@ interface AttendanceSessionRepository {
     // Lecturer: the single live session they own (or null). Snapshot-backed.
     fun observeActiveSessionForLecturer(lecturerEmail: String): Flow<AttendanceSession?>
 
+    // Sprint 13 (P1 pick): ALL currently-open sessions — the student-side
+    // "sessions open now" discovery strip on the attendance screen.
+    fun observeActiveSessions(): Flow<List<AttendanceSession>>
+
     // Student: verifications recorded against one session (live count for the lecturer UI).
     fun observeCheckIns(sessionId: String): Flow<List<AttendanceCheckIn>>
 

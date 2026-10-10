@@ -23,8 +23,10 @@ import com.myuptm.domain.repository.ClassRepository
 import com.myuptm.domain.repository.FileType
 import com.myuptm.domain.repository.NotificationsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 // Sprint 7B: global class CRUD for lecturers. Ownership rule: colleges may only
@@ -69,6 +71,13 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
     // Sprint 8 Task 5: warning-letter sending state (upload + Firestore write can take seconds).
     private val _warningBusy = MutableStateFlow(false)
     val warningBusy: StateFlow<Boolean> = _warningBusy.asStateFlow()
+
+    // Sprint 13D: per-week cancellations of recurring classes — key
+    // "classId|weekStartEpochDay" → reason (null = automatic preset notice).
+    // Everyone greys cancelled slots out; a lecturer can reinstate the week.
+    val cancellations: StateFlow<Map<String, String?>> = classRepository
+        .observeClassCancellations()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     init {
         viewModelScope.launch {
@@ -147,11 +156,12 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    // Sprint 8 Task 5: WARNING LETTERS. Red-only rule (missed >= 5) is enforced by the
-    // UI (buttons disabled otherwise); targeted to ONE student or a batch in one class.
+    // Sprint 8 Task 5: WARNING LETTERS. Red-only rule (Sprint 13D: >= 5 missed
+    // HOURS, not occurrences) enforced via [RosterStudent.severity]; the UI
+    // (buttons disabled otherwise); targeted to ONE student or a batch in one class.
     // Delivered as ANNOUNCEMENT docs stamped with the student's matric; students see
     // only global + their own warnings in the Home bell inbox.
-    fun canWarn(student: RosterStudent): Boolean = student.missed >= 5
+    fun canWarn(student: RosterStudent): Boolean = student.severity == 2
 
     fun redStudents(students: List<RosterStudent>): Int = students.count { canWarn(it) }
 
@@ -227,7 +237,12 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         levels: List<ClassLevel>,
         attention: Boolean,
         reason: String?,
-        imageUri: android.net.Uri?
+        imageUri: android.net.Uri?,
+        // Sprint 13D (owner ruling): custom classes carry the anchor date +
+        // repeat rule (oneOffWeeks: null = every week, 1 = this week only,
+        // 2–14 = a couple of weeks). null date = recurring.
+        oneOffDate: java.time.LocalDate? = null,
+        oneOffWeeks: Int? = null
     ) {
         if (!validate(subjectName, startTime, endTime)) return
         viewModelScope.launch {
@@ -241,14 +256,22 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                 startTime = startTime,
                 endTime = endTime,
                 section = section.trim(),
-                levels = levels.ifEmpty { listOf(ClassLevel.DIPLOMA) }
+                levels = levels.ifEmpty { listOf(ClassLevel.DIPLOMA) },
+                date = oneOffDate?.toEpochDay(),
+                weeks = if (oneOffDate != null) oneOffWeeks else null
             )
             classRepository.addClass(session)
                 .onSuccess {
                     _status.value = "Class added"
+                    val repeatNote = when {
+                        oneOffWeeks != null && oneOffWeeks > 1 -> " for $oneOffWeeks weeks"
+                        oneOffDate != null -> " (this week only)"
+                        else -> ""
+                    }
                     notifyChange(
                         title = "New class added",
-                        message = "${session.displayCode}: ${dayName(dayIndex)} $startTime–$endTime at ${session.venue}.",
+                        message = "${session.displayCode}: $startTime–$endTime on ${dayName(dayIndex)} " +
+                            "at ${session.venue}.$repeatNote",
                         senderName = session.lecturerName,
                         attention = attention,
                         reason = reason,
@@ -271,7 +294,11 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         levels: List<ClassLevel>,
         attention: Boolean,
         reason: String?,
-        imageUri: android.net.Uri?
+        imageUri: android.net.Uri?,
+        // Sprint 13D: repeat-rule payload (custom classes may switch between
+        // this-week-only / N weeks / every week). Nulls = recurring.
+        slotDate: java.time.LocalDate? = null,
+        oneOffWeeks: Int? = null
     ) {
         if (!validate(subjectName, startTime, endTime)) return
         viewModelScope.launch {
@@ -283,7 +310,9 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
                 endTime = endTime,
                 teachingMedium = medium,
                 section = section.trim(),
-                levels = levels.ifEmpty { listOf(ClassLevel.DIPLOMA) }
+                levels = levels.ifEmpty { listOf(ClassLevel.DIPLOMA) },
+                date = slotDate?.toEpochDay(),
+                weeks = slotDate?.let { oneOffWeeks }
             )
             classRepository.updateClass(updated)
                 .onSuccess {
@@ -313,14 +342,118 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
             classRepository.removeClass(session.id)
                 .onSuccess {
                     _status.value = "Class removed"
-                    notifyChange(
-                        title = "Class cancelled",
-                        message = "${session.displayCode} on ${dayName(session.dayIndex)} " +
-                            "${session.startTime}–${session.endTime} has been cancelled.",
+                    val title = "Class cancelled"
+                    val message = "${session.displayCode} on ${dayName(session.dayIndex)} " +
+                        "${session.startTime}–${session.endTime} has been cancelled."
+                    // Students + lecturer copy (Sprint 14 receipts).
+                    notificationsRepository.sendNotification(
+                        NotificationType.ANNOUNCEMENT,
+                        title,
+                        message,
                         senderName = session.lecturerName
+                    )
+                    notificationsRepository.sendNotification(
+                        NotificationType.ANNOUNCEMENT,
+                        title,
+                        message,
+                        senderName = session.lecturerName,
+                        lecturerOnly = true
                     )
                 }
                 .onFailure { _status.value = it.message ?: "Could not remove class" }
+        }
+    }
+
+    // Sprint 13D (owner rules): cancelling a RECURRING (faculty-preset) class is
+    // per-week and visible to EVERYONE — the slot greys out on their timetables,
+    // and students get an automatic notification: a preset message UNLESS the
+    // lecturer states a reason (then the reason rides the notification).
+    fun cancelClassForWeek(
+        session: ClassSession,
+        anchorDate: java.time.LocalDate,
+        reason: String?
+    ) {
+        viewModelScope.launch {
+            // Guard (Sprint 13D): an attendance session running for this class
+            // must end before the class can be cancelled — students mid-scanning
+            // would otherwise verify for a greyed slot.
+            val liveSession = ownerEmail?.let { email ->
+                sessionRepository.sessionsForLecturerAndClass(email, session.id)
+                    .getOrDefault(emptyList())
+                    .any { it.active }
+            } ?: false
+            if (liveSession) {
+                _status.value = "An attendance session is running for this class — end it first."
+                return@launch
+            }
+            val weekMonday = anchorDate.minusDays(((anchorDate.dayOfWeek.value) - 1).toLong())
+            classRepository.cancelClassForWeek(
+                classId = session.id,
+                weekStartEpochDay = weekMonday.toEpochDay(),
+                reason = reason?.trim()?.ifBlank { null },
+                lecturerEmail = ownerEmail
+            ).onSuccess {
+                _status.value = "Class cancelled for this week"
+                notificationsRepository.sendNotification(
+                    type = NotificationType.CLASS_UPDATE,
+                    title = "Class cancelled",
+                    message = buildString {
+                        append("${session.displayCode} (${dayName(session.dayIndex)}, ")
+                        append("${session.startTime}–${session.endTime}) is cancelled for this week.")
+                        if (!reason.isNullOrBlank()) {
+                            append("\nReason: ")
+                            append(reason.trim())
+                        }
+                    },
+                    senderName = session.lecturerName,
+                    studentOnly = true,
+                    importance = "attention"
+                )
+                // Sprint 14: the acting lecturer gets the same receipt.
+                notificationsRepository.sendNotification(
+                    type = NotificationType.CLASS_UPDATE,
+                    title = "Class cancelled",
+                    message = buildString {
+                        append("${session.displayCode} (${dayName(session.dayIndex)}, ")
+                        append("${session.startTime}–${session.endTime}) is cancelled for this week.")
+                        if (!reason.isNullOrBlank()) {
+                            append("\nReason: ")
+                            append(reason.trim())
+                        }
+                    },
+                    senderName = session.lecturerName,
+                    lecturerOnly = true,
+                    importance = "attention"
+                )
+            }.onFailure { _status.value = it.message ?: "Could not cancel class" }
+        }
+    }
+
+    // Brings a cancelled class back for that week (removes the cancellation).
+    fun reinstateClassForWeek(session: ClassSession, anchorDate: java.time.LocalDate) {
+        viewModelScope.launch {
+            val weekMonday = anchorDate.minusDays(((anchorDate.dayOfWeek.value) - 1).toLong())
+            classRepository.reinstateClassForWeek(session.id, weekMonday.toEpochDay())
+                .onSuccess {
+                    _status.value = "Class reinstated for this week"
+                    notificationsRepository.sendNotification(
+                        type = NotificationType.CLASS_UPDATE,
+                        title = "Class is back on",
+                        message = "${session.displayCode} (${dayName(session.dayIndex)}, " +
+                            "${session.startTime}–${session.endTime}) will run as scheduled this week.",
+                        senderName = session.lecturerName,
+                        studentOnly = true
+                    )
+                    notificationsRepository.sendNotification(
+                        type = NotificationType.CLASS_UPDATE,
+                        title = "Class is back on",
+                        message = "${session.displayCode} (${dayName(session.dayIndex)}, " +
+                            "${session.startTime}–${session.endTime}) will run as scheduled this week.",
+                        senderName = session.lecturerName,
+                        lecturerOnly = true
+                    )
+                }
+                .onFailure { _status.value = it.message ?: "Could not reinstate class" }
         }
     }
 
@@ -337,6 +470,8 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
         // Changes are STUDENT-ONLY news — lecturers wrote them, they don't need
         // them in their own inbox. Optional reason/context + optional image
         // (Cloudinary, like posts) enrich the detail page; no filler when omitted.
+        // Sprint 14 (owner ask): the ACTING LECTURER also receives a copy
+        // (lecturerOnly receipt) so a timetable change never silently vanishes.
         notificationsRepository.sendNotification(
             NotificationType.CLASS_UPDATE,
             title,
@@ -353,6 +488,20 @@ class ClassManagementViewModel(application: Application) : AndroidViewModel(appl
             imageUrl = imageUri?.let { uri ->
                 cloudinaryRepository.uploadFile(uri, FileType.IMAGE).getOrNull()
             }
+        )
+        notificationsRepository.sendNotification(
+            NotificationType.CLASS_UPDATE,
+            title,
+            buildString {
+                append(message)
+                if (!reason.isNullOrBlank()) {
+                    append("\n\n")
+                    append(reason.trim())
+                }
+            },
+            senderName,
+            lecturerOnly = true,
+            importance = if (attention) "attention" else "normal"
         )
     }
 

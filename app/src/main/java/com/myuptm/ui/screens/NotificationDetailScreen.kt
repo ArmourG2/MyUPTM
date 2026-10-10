@@ -129,19 +129,20 @@ fun NotificationDetailScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = { Text("Notifications") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Notifications",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
+                )
+            }
+        ) { innerPadding ->
         if (notification == null) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
@@ -423,6 +424,7 @@ fun NotificationDetailScreen(
             }
         }
     }
+    }
 
     // Decline-with-reason (mirrors the Class Management review dialog).
     if (showDeclineDialog && reviewLetter != null) {
@@ -474,19 +476,20 @@ fun WarningLettersScreen(onOpenDetail: (String) -> Unit, onBackClick: () -> Unit
             it.title.contains("warning", ignoreCase = true)
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = { Text("Warning Letters") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Warning Letters",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
+                )
+            }
+        ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -543,6 +546,7 @@ fun WarningLettersScreen(onOpenDetail: (String) -> Unit, onBackClick: () -> Unit
             }
         }
     }
+    }
 }
 
 // ---- Enrolled Sections (student, Academic Overview) ----
@@ -550,19 +554,20 @@ fun WarningLettersScreen(onOpenDetail: (String) -> Unit, onBackClick: () -> Unit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnrolledSectionsScreen(onBackClick: () -> Unit) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = { Text("Academic Overview") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Academic Overview",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
+                )
+            }
+        ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -649,6 +654,7 @@ fun EnrolledSectionsScreen(onBackClick: () -> Unit) {
                 }
             }
         }
+    }
     }
 }
 

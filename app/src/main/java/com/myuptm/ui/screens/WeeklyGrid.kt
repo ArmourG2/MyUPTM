@@ -61,9 +61,14 @@ fun SingleDayGrid(
     scroll: ScrollState,
     date: LocalDate,
     isStudent: Boolean,
+    // Sprint 13D: lecturers tap empty timetable areas to add classes.
+    canManageSlots: Boolean,
+    // Sprint 13D: classId → cancellation reason for the shown date. Cancelled
+    // classes GREY OUT ("Cancelled (this week)") instead of disappearing.
+    cancelledReasons: Map<String, String?>,
     classes: List<ClassSession>,
     plans: List<PersonalPlan>,
-    onClassClick: (ClassSession) -> Unit,
+    onClassClick: (ClassSession, LocalDate) -> Unit,
     onPlanClick: (PersonalPlan) -> Unit,
     onAddSlot: (date: LocalDate, startTime: String, endTime: String) -> Unit
 ) {
@@ -86,6 +91,8 @@ fun SingleDayGrid(
             columnDate = date,
             showFreeBars = true,
             isStudent = isStudent,
+            canManageSlots = canManageSlots,
+            cancelledReasons = cancelledReasons,
             classes = classes,
             plans = plans,
             onClassClick = onClassClick,
@@ -105,9 +112,14 @@ fun WeeklyGrid(
     isCurrentPage: Boolean,
     todayIndex: Int,
     isStudent: Boolean,
+    // Sprint 13D: lecturers tap empty timetable areas to add classes.
+    canManageSlots: Boolean,
+    // Sprint 13D: classId → cancellation reason for the displayed week
+    // (cancelled blocks grey out instead of disappearing).
+    cancelledReasons: Map<String, String?>,
     classes: List<List<ClassSession>>,
     plans: List<PersonalPlan>,
-    onClassClick: (ClassSession) -> Unit,
+    onClassClick: (ClassSession, LocalDate) -> Unit,
     onPlanClick: (PersonalPlan) -> Unit,
     onAddSlot: (date: LocalDate, startTime: String, endTime: String) -> Unit
 ) {
@@ -171,6 +183,8 @@ fun WeeklyGrid(
                         columnDate = columnDate,
                         showFreeBars = false,
                         isStudent = isStudent,
+                        canManageSlots = canManageSlots,
+                        cancelledReasons = cancelledReasons,
                         classes = classes.getOrNull(dayIndex) ?: emptyList(),
                         plans = plans.filter { it.date == columnDate },
                         onClassClick = onClassClick,
@@ -220,9 +234,18 @@ internal fun DayColumn(
     columnDate: LocalDate,
     showFreeBars: Boolean,
     isStudent: Boolean,
+    // Sprint 13D: lecturers manage classes straight on the timetable — empty
+    // area taps open the prefilled class editor.
+    canManageSlots: Boolean,
+    // Sprint 13D: classId → cancellation reason for THIS column's week.
+    // Cancelled classes GREY OUT ("Cancelled (this week)") instead of being
+    // removed; the record survives in Firestore and returns next week.
+    cancelledReasons: Map<String, String?>,
     classes: List<ClassSession>,
     plans: List<PersonalPlan>,
-    onClassClick: (ClassSession) -> Unit,
+    // Sprint 13D: class clicks carry the day's date (needed for the per-week
+    // removal anchor + editor context).
+    onClassClick: (ClassSession, LocalDate) -> Unit,
     onPlanClick: (PersonalPlan) -> Unit,
     onAddSlot: (date: LocalDate, startTime: String, endTime: String) -> Unit
 ) {
@@ -240,9 +263,10 @@ internal fun DayColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(GRID_HEIGHT_DP.dp)
-                .pointerInput(dayIndex, columnDate, isStudent) {
-                    if (!isStudent) return@pointerInput
-                    // Empty area tap → Add-plan prefilled with a 30-min-snapped 1h slot.
+                .pointerInput(dayIndex, columnDate, isStudent, canManageSlots) {
+                    if (!isStudent && !canManageSlots) return@pointerInput
+                    // Empty-area tap: students → prefilled Add-plan (30-min snapped
+                    // 1h slot); lecturers → prefilled Add-class (dispatch paddup in the screen).
                     detectTapGestures { position ->
                         val pxPerMinute = size.height / GRID_TOTAL_MINUTES.toFloat()
                         val slot = ((position.y / pxPerMinute) / 30).toInt() * 30
@@ -271,14 +295,30 @@ internal fun DayColumn(
                     is TimelineEntry.ClassEntry -> {
                         val s = entry.session
                         val durMinutes = s.endTime.toMinutes() - s.startTime.toMinutes()
+                        // Sprint 13D: cancelled-for-this-week classes GREY OUT with
+                        // a "Cancelled" overlay instead of animating away — students
+                        // still see the slot, just marked as not happening.
+                        val cancelled = cancelledReasons.containsKey(s.id)
+                        val greyedColors = if (cancelled) {
+                            MaterialTheme.colorScheme.surfaceContainerHighest to
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer to
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                        }
                         GridBlock(
-                            title = s.subjectName,
-                            subtitle = if (durMinutes >= 90) s.lecturerName else null,
+                            title = if (cancelled) "${s.subjectName} (cancelled)" else s.subjectName,
+                            subtitle = when {
+                                cancelled -> cancelledReasons[s.id]?.let { "Why: $it" }
+                                    ?: "Not happening this week"
+                                durMinutes >= 90 -> s.lecturerName
+                                else -> null
+                            },
                             startMinute = s.startTime.toMinutes(),
                             endMinute = s.endTime.toMinutes(),
-                            container = MaterialTheme.colorScheme.primaryContainer,
-                            onContainer = MaterialTheme.colorScheme.onPrimaryContainer,
-                            onClick = { onClassClick(s) }
+                            container = greyedColors.first,
+                            onContainer = greyedColors.second,
+                            onClick = { onClassClick(s, columnDate) }
                         )
                     }
                     is TimelineEntry.PlanEntry -> {

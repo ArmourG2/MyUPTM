@@ -70,6 +70,8 @@ import com.myuptm.domain.model.PersonalPlan
 import com.myuptm.domain.model.TeachingMedium
 import com.myuptm.domain.model.toPermissions
 import com.myuptm.ui.components.DayChip
+import com.myuptm.ui.components.tourTarget
+import com.myuptm.viewmodel.ClassManagementViewModel
 import com.myuptm.viewmodel.TimetableViewMode
 import com.myuptm.viewmodel.TimetableViewModel
 import kotlinx.coroutines.launch
@@ -167,7 +169,32 @@ fun TimetableScreen(
     var addDialogPrefill by remember { mutableStateOf<PlanPrefill?>(null) }
     var editingPlan by remember { mutableStateOf<PersonalPlan?>(null) }
     var optionsPlan by remember { mutableStateOf<PersonalPlan?>(null) }
-    var detailClass by remember { mutableStateOf<ClassSession?>(null) }
+    var detailClass by remember { mutableStateOf<Pair<ClassSession, LocalDate>?>(null) }
+    // Sprint 13D: lecturer manages classes DIRECTLY on the timetable — tap an
+    // existing slot to edit it, an empty area to add a class prefilled with the
+    // tapped day/time. The class VM is the SAME activity-scoped instance the
+    // Class Management screen uses, so edits fire the usual notifications.
+    val classManagementViewModel: ClassManagementViewModel = viewModel()
+    // The class VM needs the signed-in lecturer's email for ownership scoping.
+    LaunchedEffect(user?.email) { classManagementViewModel.bindOwner(user?.email) }
+    var editingClass by remember { mutableStateOf<ClassSession?>(null) }
+    var editingClassAnchor by remember { mutableStateOf<LocalDate?>(null) }
+    var addClassPrefill by remember { mutableStateOf<PlanPrefill?>(null) }
+    val classStatus by classManagementViewModel.status.collectAsState()
+    // Sprint 13D: per-week cancellations — keys "classId|weekStartEpochDay",
+    // reason as the value. Cancelled slots GREY OUT for everyone (owner removal
+    // is global now, not device-local).
+    val classCancellations by classManagementViewModel.cancellations.collectAsState()
+    val canManageSlots = canManageClasses
+
+    // Cancelling keys for ONE week (classId → reason) — the week containing date.
+    fun cancellationReasonsFor(weekMonday: LocalDate): Map<String, String?> =
+        classCancellations.mapNotNull { (key, reason) ->
+            val parts = key.split("|")
+            if (parts.size == 2 && parts[1].toLongOrNull() == weekMonday.toEpochDay()) {
+                parts[0] to reason
+            } else null
+        }.toMap()
 
     // Screen-level dialog prefill for Add: FAB → today now-ish slot; grid taps → tapped day.
     val openAddDialog: (date: LocalDate, startTime: String, endTime: String) -> Unit =
@@ -193,79 +220,68 @@ fun TimetableScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // --- Immersive header: title + subtitle left, self-explanatory view pill right ---
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 22.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Timetable",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                // Labelled view pill: shows the CURRENT view so users know what it switches.
-                Box {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                            .clickable { viewMenuOpen = true }
-                            .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (viewMode == TimetableViewMode.DAILY) "Day view" else "Week view",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            Icons.Filled.ArrowDropDown,
-                            contentDescription = "Switch timetable view",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    DropdownMenu(expanded = viewMenuOpen, onDismissRequest = { viewMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Daily view") },
-                            trailingIcon = {
-                                RadioButton(
-                                    selected = viewMode == TimetableViewMode.DAILY,
-                                    onClick = null
-                                )
-                            },
-                            onClick = {
-                                viewModel.setViewMode(TimetableViewMode.DAILY)
-                                viewMenuOpen = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Weekly view") },
-                            trailingIcon = {
-                                RadioButton(
-                                    selected = viewMode == TimetableViewMode.WEEKLY,
-                                    onClick = null
-                                )
-                            },
-                            onClick = {
-                                viewModel.setViewMode(TimetableViewMode.WEEKLY)
-                                viewMenuOpen = false
-                            }
-                        )
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Column(modifier = Modifier.fillMaxSize().tourTarget("timetable_grid")) {
+            // --- Hero header: title + subtitle left, self-explanatory view pill right ---
+            com.myuptm.ui.components.CampusHeroHeader(
+                title = "Timetable",
+                subtitle = subtitle,
+                actions = {
+                    // Labelled view pill: shows the CURRENT view so users know what it switches.
+                    Box {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f))
+                                .clickable { viewMenuOpen = true }
+                                .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (viewMode == TimetableViewMode.DAILY) "Day view" else "Week view",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = androidx.compose.ui.graphics.Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Filled.ArrowDropDown,
+                                contentDescription = "Switch timetable view",
+                                tint = androidx.compose.ui.graphics.Color.White
+                            )
+                        }
+                        DropdownMenu(expanded = viewMenuOpen, onDismissRequest = { viewMenuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Daily view") },
+                                trailingIcon = {
+                                    RadioButton(
+                                        selected = viewMode == TimetableViewMode.DAILY,
+                                        onClick = null
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.setViewMode(TimetableViewMode.DAILY)
+                                    viewMenuOpen = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Weekly view") },
+                                trailingIcon = {
+                                    RadioButton(
+                                        selected = viewMode == TimetableViewMode.WEEKLY,
+                                        onClick = null
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.setViewMode(TimetableViewMode.WEEKLY)
+                                    viewMenuOpen = false
+                                }
+                            )
+                        }
                     }
                 }
-            }
+            )
 
             if (isStudent && clashWarnings.isNotEmpty()) {
                 ClashWarningBanner(
@@ -299,8 +315,21 @@ fun TimetableScreen(
                 }
             }
 
-            val onClassClick = { session: ClassSession -> detailClass = session }
+            val onClassClick = { session: ClassSession, anchoredDate: LocalDate ->
+                if (canManageClasses && session.ownerEmail != null) {
+                    // Lecturer + own slot → the EDITOR opens directly.
+                    editingClass = session
+                    editingClassAnchor = anchoredDate
+                } else {
+                    detailClass = session to anchoredDate
+                }
+            }
             val onPlanClick = { plan: PersonalPlan -> optionsPlan = plan }
+            // Sprint 13D dispatch: students add plans; lecturers add classes —
+            // both via the grid's empty-area taps.
+            val onAddSlot: (LocalDate, String, String) -> Unit = { date, start, end ->
+                if (isStudent) openAddDialog(date, start, end) else addClassPrefill = PlanPrefill(date, start, end)
+            }
 
             if (viewMode == TimetableViewMode.DAILY) {
                 // --- Daily: full pager over days, same feel as Weekly ---
@@ -309,16 +338,19 @@ fun TimetableScreen(
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     val pageDate = today.plusDays((page - DAY_BASE).toLong())
+                    val cancelledForPage = cancellationReasonsFor(weekMondayOf(pageDate))
                     SingleDayGrid(
                         modifier = Modifier.fillMaxSize(),
                         scroll = gridScroll,
                         date = pageDate,
                         isStudent = isStudent,
+                        canManageSlots = canManageSlots,
                         classes = visibleTimetable.getOrNull(pageDate.dayOfWeek.value - 1) ?: emptyList(),
+                        cancelledReasons = cancelledForPage,
                         plans = if (isStudent) allPlans.filter { it.date == pageDate } else emptyList(),
                         onClassClick = onClassClick,
                         onPlanClick = onPlanClick,
-                        onAddSlot = openAddDialog
+                        onAddSlot = onAddSlot
                     )
                 }
             } else {
@@ -327,6 +359,8 @@ fun TimetableScreen(
                     state = weekPagerState,
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
+                    val pageWeekStart = weekMondayOf(today.plusDays(((page - WEEK_BASE) * 7L)))
+                    val cancelledForPage = cancellationReasonsFor(pageWeekStart)
                     WeeklyGrid(
                         modifier = Modifier.fillMaxSize(),
                         scroll = gridScroll,
@@ -334,11 +368,13 @@ fun TimetableScreen(
                         isCurrentPage = weekPagerState.currentPage == page,
                         todayIndex = today.dayOfWeek.value - 1,
                         isStudent = isStudent,
+                        canManageSlots = canManageSlots,
                         classes = visibleTimetable,
+                        cancelledReasons = cancelledForPage,
                         plans = if (isStudent) allPlans else emptyList(),
                         onClassClick = onClassClick,
                         onPlanClick = onPlanClick,
-                        onAddSlot = openAddDialog
+                        onAddSlot = onAddSlot
                     )
                 }
             }
@@ -353,17 +389,10 @@ fun TimetableScreen(
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Add plan")
             }
-        } else if (canManageClasses && onOpenClassManagement != null) {
-            // Sprint 8: lecturers manage their own timetable straight from here.
-            FloatingActionButton(
-                onClick = { onOpenClassManagement() },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Manage own classes")
-            }
         }
+        // Sprint 14 (owner ask): the lecturer timetable FAB is GONE — classes
+        // are built on the board itself (tap slot = edit, empty area = add) and
+        // Class Management is reachable from the "Classes" bottom tab.
     }
 
     // --- Plan options popup (Edit / Delete) — user-created plans only ---
@@ -425,10 +454,66 @@ fun TimetableScreen(
         )
     }
 
-    detailClass?.let { session ->
+    detailClass?.let { (session, anchoredDate) ->
         ClassDetailPopup(session = session, onDismiss = { detailClass = null })
     }
+
+    // Sprint 13D: lecturer class editor, ADD prefilled from the tapped slot.
+    addClassPrefill?.let { prefill ->
+        ClassEditorDialog(
+            title = "Add class",
+            initial = null,
+            defaultDayIndex = prefill.date.dayOfWeek.value - 1,
+            defaultStart = prefill.startTime,
+            defaultEnd = prefill.endTime,
+            errorMessage = classStatus,
+            onDismiss = {
+                addClassPrefill = null
+                classManagementViewModel.clearStatus()
+            },
+            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image, slotDate, weeks ->
+                classManagementViewModel.addClass(subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image, slotDate, weeks)
+                if (classManagementViewModel.status.value == null) addClassPrefill = null
+            }
+        )
+    }
+
+    // Sprint 13D: lecturer class editor, EDIT tapped straight from a slot —
+    // with "Remove for this week" (global grey-out + automatic notification)
+    // and "Reinstate" when that week is already cancelled.
+    editingClass?.let { session ->
+        val anchor = editingClassAnchor ?: LocalDate.now()
+        val cancelledNow = classCancellations.containsKey(
+            "${session.id}|${weekMondayOf(anchor).toEpochDay()}"
+        )
+        ClassEditorDialog(
+            title = "Edit class",
+            initial = session,
+            errorMessage = classStatus,
+            isCancelledForWeek = cancelledNow,
+            onRemoveForWeek = { reason ->
+                classManagementViewModel.cancelClassForWeek(session, anchor, reason)
+                editingClass = null
+            },
+            onReinstateForWeek = {
+                classManagementViewModel.reinstateClassForWeek(session, anchor)
+                editingClass = null
+            },
+            onDismiss = {
+                editingClass = null
+                classManagementViewModel.clearStatus()
+            },
+            onSave = { subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image, slotDate, weeks ->
+                classManagementViewModel.updateClass(session, subject, venue, dayIndex, start, end, medium, section, levels, attention, reason, image, slotDate, weeks)
+                if (classManagementViewModel.status.value == null) editingClass = null
+            }
+        )
+    }
 }
+
+// The Monday of the week containing [date] (per-week suppression anchor).
+private fun weekMondayOf(date: LocalDate): LocalDate =
+    date.minusDays(((date.dayOfWeek.value) - 1).toLong())
 
 @Composable
 private fun ClashWarningBanner(warnings: List<AppNotification>, onDismiss: () -> Unit) {

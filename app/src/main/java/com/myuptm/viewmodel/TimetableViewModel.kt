@@ -53,6 +53,13 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
         if (user == null || repo == null) flowOf(emptyList()) else repo.observePlans()
     }
 
+    // Sprint 13D: lecturer-side per-week class removals are now GLOBAL Firestore
+    // `class_cancellations` (students see the slot greyed + get an automatic
+    // notification). The device-local removal store is gone.
+    val cancellations: StateFlow<Map<String, String?>> = classRepository
+        .observeClassCancellations()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     // Device-local personal plans (one-time events with concrete dates), students only.
     val plans: StateFlow<List<PersonalPlan>> = plansFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())

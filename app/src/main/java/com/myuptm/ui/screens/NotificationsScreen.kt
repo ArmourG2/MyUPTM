@@ -134,28 +134,35 @@ fun NotificationsScreen(
 
     var swipeTarget by remember { mutableStateOf<Pair<NotificationTier, AppNotification>?>(null) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = { Text("Notifications") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    // Clear hides YELLOW + BLUE (RED stays until upload). The old
-                    // "Notify students" composer was removed (obsolete — posts push).
-                    if (notifications.any { it.notificationTier() != NotificationTier.IMPORTANT }) {
-                        TextButton(onClick = { inboxViewModel.clearUpdates() }) {
-                            Text("Clear")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Notifications",
+                    subtitle = "Latest updates & letters",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
+                    },
+                    actions = {
+                        // Clear hides YELLOW + BLUE (RED stays until upload). The old
+                        // "Notify students" composer was removed (obsolete — posts push).
+                        if (notifications.any { it.notificationTier() != NotificationTier.IMPORTANT }) {
+                            TextButton(
+                                onClick = { inboxViewModel.clearUpdates() },
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = androidx.compose.ui.graphics.Color.White
+                                )
+                            ) {
+                                Text("Clear")
+                            }
                         }
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
+                )
+            }
+        ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -237,6 +244,7 @@ fun NotificationsScreen(
                 }
             }
         }
+    }
     }
 
     // Wireframe dialog: "Are you sure?" — swipe-confirm narrative per tier.

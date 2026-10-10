@@ -51,19 +51,13 @@ fun PostsScreen(
 
     // Box allows us to layer the FAB over the LazyColumn
     Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
         Column(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp)) {
-                Text(
-                    "Posts",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "Faculty news and announcements",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            com.myuptm.ui.components.CampusHeroHeader(
+                title = "Posts",
+                subtitle = "Faculty news and announcements"
+            )
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),

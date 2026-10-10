@@ -21,4 +21,18 @@ interface ClassRepository {
     // Deletes a global class by document id.
     // Fails if the current user is not allowed to modify it.
     suspend fun removeClass(classId: String): Result<Unit>
+
+    // ---- Sprint 13D: per-week CANCELLATIONS of recurring departmental classes
+    // (a cancelled slot greys out for everyone for exactly one week and never
+    // deletes the Firestore class record). Keys = "classId|weekStartEpochDay".
+    fun observeClassCancellations(): Flow<Map<String, String?>>
+
+    suspend fun cancelClassForWeek(
+        classId: String,
+        weekStartEpochDay: Long,
+        reason: String?,
+        lecturerEmail: String?
+    ): Result<Unit>
+
+    suspend fun reinstateClassForWeek(classId: String, weekStartEpochDay: Long): Result<Unit>
 }

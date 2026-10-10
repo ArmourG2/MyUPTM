@@ -57,6 +57,7 @@ import com.myuptm.navigation.MyUptmRoutes
 import com.myuptm.ui.components.AnnouncementRow
 import com.myuptm.viewmodel.AdminDashboardViewModel
 import com.myuptm.viewmodel.InboxViewModel
+import com.myuptm.ui.components.tourTarget
 
 // Sprint 11: the admin's FIRST screen (Home was removed for this role — its
 // anatomy is timetable-tied and admins don't teach). A deliberately simple POC
@@ -118,7 +119,11 @@ fun AdminDashboardScreen(
             // (the extended library costs ~35 MB of dex for 6 icons).
             // Sprint 13C: Students/Lecturers/Classes tiles open their directory.
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    // Sprint 14: tour spotlight target (tiles).
+                    modifier = Modifier.tourTarget("dash_tiles")
+                ) {
                     StatTile(
                         icon = ImageVector.vectorResource(R.drawable.ic_people),
                         label = "Students",
@@ -160,10 +165,12 @@ fun AdminDashboardScreen(
 
             // ---- Pending UPTM emails (not yet assigned lecturer/student/admin) ----
             item {
+                // Sprint 14: tour spotlight target (pending list header).
                 Text(
                     "Pending UPTM email assignment",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.tourTarget("dash_pending")
                 )
             }
             if (state.pendingAccounts.isEmpty()) {
@@ -211,10 +218,12 @@ fun AdminDashboardScreen(
 
             // ---- Announcements (live feed, read-only) ----
             item {
+                // Sprint 14: tour spotlight target (announcements).
                 Text(
                     "Announcements",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.tourTarget("dash_announcements")
                 )
             }
             if (posts.isEmpty()) {

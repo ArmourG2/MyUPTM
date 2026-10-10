@@ -7,6 +7,7 @@ object MyUptmRoutes {
     const val POSTS = "posts"
     const val PROFILE = "profile"
     const val SIGN_IN = "sign_in"
+    const val HELP = "help"
     const val SETTINGS = "settings"
     const val POST_DETAIL = "post_detail/{postId}"
     const val CLASS_MANAGEMENT = "class_management"

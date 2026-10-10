@@ -70,30 +70,30 @@ fun PostDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Posts") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (canRemovePost && post != null) {
-                        IconButton(onClick = { showDeleteConfirm = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Remove post")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Posts",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
+                    },
+                    actions = {
+                        if (canRemovePost && post != null) {
+                            IconButton(onClick = { showDeleteConfirm = true }) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "Remove post",
+                                    tint = androidx.compose.ui.graphics.Color.White
+                                )
+                            }
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                // The OUTER scaffold already pads the status bar — without this the
-                // inset is applied twice and the bar sits ~30dp too low.
-                windowInsets = WindowInsets(0, 0, 0, 0)
-            )
-        },
+                )
+            },
         floatingActionButton = {
             // Share becomes a proper extended FAB (was an orphan top-bar icon).
             ExtendedFloatingActionButton(
@@ -260,6 +260,7 @@ fun PostDetailScreen(
                 Spacer(Modifier.height(96.dp)) // FAB clearance
             }
         }
+    }
     }
 
     if (showDeleteConfirm && post != null) {

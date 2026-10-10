@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
 import androidx.lifecycle.ViewModelStoreOwner
@@ -40,18 +41,14 @@ fun getBottomNavItems(userRole: UserRole, enrolledStudent: Boolean): List<Bottom
         BottomNavItem(MyUptmRoutes.PROFILE, "Profile", Icons.Filled.Person)
     )
 
-    // Insert role-specific tabs in the correct order (Home, [RoleTab1], [RoleTab2], Posts, Profile)
     return when (userRole) {
         UserRole.STUDENT -> {
             // Sprint 13C: a fresh (un-enrolled) registration has no classes,
-            // attendance or plans — they get the lean 3-tab nav until the admin
-            // enrols them (enrolled accounts keep the full 5-tab nav).
             if (!enrolledStudent) baseItems
             else {
-                // Student gets Timetable and Attendance
                 val studentTabs = listOf(
                     BottomNavItem(MyUptmRoutes.TIMETABLE, "Timetable", Icons.Filled.DateRange),
-                    BottomNavItem(MyUptmRoutes.ATTENDANCE, "Attendance", Icons.Filled.CheckCircle)
+                    BottomNavItem(MyUptmRoutes.ATTENDANCE, "Attend", Icons.Filled.CheckCircle)
                 )
                 listOf(baseItems[0]) + studentTabs + baseItems.subList(1, 3)
             }
@@ -83,7 +80,7 @@ fun getBottomNavItems(userRole: UserRole, enrolledStudent: Boolean): List<Bottom
 @Composable
 fun BottomNavBar(
     navController: NavHostController,
-        userRole: UserRole, // <-- Added role parameter
+        userRole: UserRole,
     // Sprint 13C: false for fresh registrations — they get the lean 3-tab nav.
     enrolledStudent: Boolean = true
 ) {
@@ -103,6 +100,8 @@ fun BottomNavBar(
         navItems.forEach { item ->
             NavigationBarItem(
                 selected = currentRoute == item.route,
+                // Sprint 14: tour spotlight targets (route-keyed tags).
+                modifier = Modifier.tourTarget(item.route),
                 onClick = {
                     if (currentRoute == item.route) {
                         if (item.route == MyUptmRoutes.TIMETABLE) {
@@ -113,7 +112,6 @@ fun BottomNavBar(
                             timetableViewModel.requestReset()
                         }
                         // Sprint 11: pop to the GRAPH start destination (admins have no
-                        // Home tab, so the literal HOME route is no longer on their stack).
                         navController.navigate(item.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = false }
                             launchSingleTop = true
@@ -122,7 +120,11 @@ fun BottomNavBar(
                     }
                 },
                 icon = { Icon(imageVector = item.icon, contentDescription = item.label) },
-                label = { Text(text = item.label) },
+                label = {
+                    // Sprint 13C: single-line labels — "Attendance" wrapped into
+                    // "attendanc/e" on narrow 5-tab rows; never wrap now.
+                    Text(text = item.label, maxLines = 1)
+                },
                 // Sprint 12: unselected tabs show icon only; the selected tab's icon
                 // rises and its label slides in — saves space on 5-tab small screens.
                 alwaysShowLabel = false

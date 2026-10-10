@@ -25,8 +25,42 @@ data class ClassSession(
     // ownerEmail == null marks the auto-seeded departmental classes shown to
     // everyone EXCEPT the owning lecturer (lecturers see ONLY their own).
     val ownerEmail: String? = null,
-    val updatedAt: Long? = null
+    val updatedAt: Long? = null,
+    // Sprint 13D (owner rules): repeat rule —
+    //  - date = null, weeks = null → recurring (faculty preset OR custom
+    //    PERMANENT "every week" class),
+    //  - date != null + weeks = 1  → ONCE: visible only in its own week,
+    //  - date != null + weeks = N  → RANGE: visible for N weeks from that week.
+    val date: Long? = null,
+    val weeks: Int? = null
 ) {
+    // Sprint 13D: a CUSTOM class = lecturer-created (ownerEmail != null), i.e.
+    // NOT a faculty preset slot — edit/delete rights live in Class Management.
+    val isCustom: Boolean get() = ownerEmail != null
+    val isOneOff: Boolean get() = date != null
+
+    // True when this class should appear in the week starting [weekMonday].
+    // Recurring/permanent classes appear every week; dated classes follow their
+    // repeat rule (own week for ONCE, weeks span for RANGE).
+    fun visibleInWeek(weekMonday: java.time.LocalDate): Boolean {
+        if (date == null) return true
+        val startD = java.time.LocalDate.ofEpochDay(date)
+        val startMonday = startD.minusDays(((startD.dayOfWeek.value) - 1).toLong())
+        val shown = weekMonday.toEpochDay()
+        val lo = startMonday.toEpochDay()
+        return shown >= lo && shown <= lo + (((weeks ?: 1) - 1).toLong() * 7)
+    }
+
+    // Human label for the repeat rule (roster/directory tags).
+    val repeatRuleLabel: String
+        get() = when {
+            date == null -> "Every week"
+            else -> when (weeks) {
+                null, 1 -> "This week only"
+                else -> "$weeks weeks"
+            }
+        }
+
     // Primary level = the merged set's first entry (display fallback / legacy reads).
     val level: ClassLevel get() = levels.firstOrNull() ?: ClassLevel.DIPLOMA
 

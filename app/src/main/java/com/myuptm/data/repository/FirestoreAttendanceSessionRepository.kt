@@ -39,6 +39,25 @@ class FirestoreAttendanceSessionRepository(
             awaitClose { registration.remove() }
         }
 
+    // Sprint 13 (P1 pick): ALL currently-open sessions (any lecturer) — the
+    // student-side "sessions open now" discovery chips. Equality-only.
+    override fun observeActiveSessions(): Flow<List<AttendanceSession>> = callbackFlow {
+        val registration: ListenerRegistration = db.collection(SESSIONS)
+            .whereEqualTo("active", true)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+                val rows = snapshot?.documents
+                    ?.mapNotNull { it.toSession() }
+                    ?.sortedByDescending { it.startedAt }
+                    ?: emptyList()
+                trySend(rows)
+            }
+        awaitClose { registration.remove() }
+    }
+
     override fun observeCheckIns(sessionId: String): Flow<List<AttendanceCheckIn>> =
         callbackFlow {
             val registration: ListenerRegistration = db.collection(CHECKINS)

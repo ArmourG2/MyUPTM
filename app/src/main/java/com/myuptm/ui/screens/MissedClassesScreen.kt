@@ -12,6 +12,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -63,7 +65,7 @@ import java.util.Locale
 // quirks). Subject cards expand into per-session rows; each MISSED row submits its
 // own per-class letter; a submitted letter flips its row to amber "Pending" until
 // the lecturer approves or declines it.
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MissedClassesScreen(
     viewModel: ProfileViewModel,
@@ -83,21 +85,21 @@ fun MissedClassesScreen(
         pendingLetterSubject = null
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Missed classes", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Missed classes",
+                    subtitle = "Tap a subject to see which sessions need a letter",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
                     }
-                }
-            )
-        }
-    ) { padding ->
+                )
+            }
+        ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -105,13 +107,6 @@ fun MissedClassesScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
-            Text(
-                "Tap a subject to see which sessions need a letter",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-            )
-
             val attendance = uiState.attendance
             if (attendance == null) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -175,6 +170,7 @@ fun MissedClassesScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
+    }
 }
 
 // Sprint 9: subject card — collapsed shows the monogram + counts; expanded shows
@@ -227,7 +223,12 @@ private fun SubjectCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Small screens: pills must wrap onto extra lines instead of
+                    // overflowing (the last chip used to squash vertically).
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         TonalPill(
                             text = if (info.missed > 0) "${info.missed} missed" else "excused",
                             container = MaterialTheme.colorScheme.errorContainer,
@@ -379,6 +380,8 @@ private fun SessionRecordRow(
     }
 }
 
+// The pill never lets its text wrap — on narrow screens the whole pill moves
+// to a FlowRow line instead of squashing "1 excused" letter-by-letter.
 @Composable
 private fun TonalPill(text: String, container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color) {
     Box(
@@ -391,7 +394,9 @@ private fun TonalPill(text: String, container: androidx.compose.ui.graphics.Colo
             text,
             style = MaterialTheme.typography.labelSmall,
             color = content,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }

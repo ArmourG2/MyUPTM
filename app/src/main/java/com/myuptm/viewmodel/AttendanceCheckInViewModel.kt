@@ -36,7 +36,10 @@ class AttendanceCheckInViewModel(application: Application) : AndroidViewModel(ap
         val scanNotice: String? = null,
         val scanNoticeAt: Long? = null,
         // Recent verifications by this student (newest first).
-        val myCheckIns: List<AttendanceCheckIn> = emptyList()
+        val myCheckIns: List<AttendanceCheckIn> = emptyList(),
+        // Sprint 13 (P1 pick): ALL sessions open NOW (any lecturer) — the
+        // discovery chips ride above the QR/PIN toggle; one tap verifies.
+        val openSessions: List<AttendanceSession> = emptyList()
     )
 
     private val _uiState = MutableStateFlow(CheckInUiState())
@@ -75,6 +78,12 @@ class AttendanceCheckInViewModel(application: Application) : AndroidViewModel(ap
                 repository.observeMyCheckIns(resolved).collect { rows ->
                     _uiState.value = _uiState.value.copy(myCheckIns = rows)
                 }
+            }
+        }
+        // Live feed of sessions open NOW — powers the discovery chips.
+        viewModelScope.launch {
+            repository.observeActiveSessions().collect { sessions ->
+                _uiState.value = _uiState.value.copy(openSessions = sessions)
             }
         }
     }

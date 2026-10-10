@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.myuptm.domain.model.AppNotification
@@ -48,8 +50,25 @@ import com.myuptm.viewmodel.AuthViewModel
 import com.myuptm.viewmodel.InboxViewModel
 import com.myuptm.viewmodel.SettingsViewModel
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
+// Routes whose screens render the campus-photo hero header — they pad their
+// own top inset, so the activity only reserves the bottom bar for them.
+// (post_detail/* and notif_detail/* are matched by prefix at the call site.)
+private val CampusHeroRoutes = setOf(
+    MyUptmRoutes.HOME,
+    MyUptmRoutes.TIMETABLE,
+    MyUptmRoutes.ATTENDANCE,
+    MyUptmRoutes.POSTS,
+    MyUptmRoutes.PROFILE,
+    MyUptmRoutes.HELP,
+    MyUptmRoutes.SETTINGS,
+    MyUptmRoutes.NOTIFICATIONS,
+    MyUptmRoutes.MISSED_CLASSES,
+    MyUptmRoutes.ENROLLED_SECTIONS,
+    MyUptmRoutes.WARNING_LETTERS,
+    MyUptmRoutes.ADD_POST
+)
+
+class MainActivity : ComponentActivity() {    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -80,6 +99,16 @@ fun MyUptmApp() {
     val enrolledStudent = userRecord?.let {
         com.myuptm.data.repository.MockAttendanceRoster.isEnrolledDemoStudent(it.studentId, it.email)
     } ?: false
+    // Sprint 14 (owner ask): sticky student nav — the FIRST class visible for
+    // their week upgrades the student to the 5-tab nav and it STAYS (a one-week
+    // class expiring leaves Timetable/Attendance in place, timetable empty).
+    val studentNavViewModel: com.myuptm.viewmodel.StudentNavViewModel = viewModel()
+    val studentHasClasses by studentNavViewModel.hasClassThisWeek.collectAsState()
+    val studentNavUpgraded by studentNavViewModel.navUpgraded.collectAsState()
+    val studentFiveTabs = enrolledStudent || studentHasClasses || studentNavUpgraded
+    androidx.compose.runtime.LaunchedEffect(userRecord) {
+        studentNavViewModel.bindUser(userRecord)
+    }
     // Sprint 9: one app-lifetime inbox listener (shade push + unread dot for all roles).
     val inboxViewModel: InboxViewModel = viewModel()
     val inboxState by inboxViewModel.inbox.collectAsState()
@@ -103,7 +132,7 @@ fun MyUptmApp() {
                 BottomNavBar(
                     navController = navController,
                     userRole = userRole!!,
-                    enrolledStudent = enrolledStudent
+                    enrolledStudent = studentFiveTabs
                 )
             }
         }
@@ -118,12 +147,42 @@ fun MyUptmApp() {
                 CircularProgressIndicator()
             }
         } else {
+            // Campus-hero routes draw their photo header under the status bar
+            // (each screen pads its own top content); only the bottom-bar
+            // padding is kept here. Sign-in is fully full-bleed. Admin /
+            // lecturer-only screens keep the original safe-area padding.
+            val heroRoute = currentRoute != null && (
+                currentRoute in CampusHeroRoutes ||
+                    currentRoute.startsWith("post_detail/") ||
+                    currentRoute.startsWith("notif_detail/")
+                )
             MyUptmNavHost(
                 navController = navController,
-                modifier = Modifier.padding(innerPadding)
+                modifier = when {
+                    currentRoute == MyUptmRoutes.SIGN_IN -> Modifier
+                    heroRoute -> Modifier.padding(
+                        PaddingValues(bottom = innerPadding.calculateBottomPadding())
+                    )
+                    else -> Modifier.padding(innerPadding)
+                }
             )
         }
     }
+
+    // Sprint 14: the tour host renders OVER everything (Help page "Tour" runs it
+    // against the tags registered by the visible screen).
+    // Sprint 14 fix: the tour now MOVES between screens — the host needs a way
+    // to navigate, so bind the NavController here once.
+    androidx.compose.runtime.SideEffect {
+        com.myuptm.ui.components.TourSession.navigator = { route ->
+            navController.navigate(route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = false }
+                launchSingleTop = true
+                restoreState = false
+            }
+        }
+    }
+    com.myuptm.ui.components.TourOverlayHost()
 
     if (showUnreadPopup) {
         UnreadNotificationPopup(

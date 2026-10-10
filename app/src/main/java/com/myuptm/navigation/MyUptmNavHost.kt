@@ -43,6 +43,8 @@ import com.myuptm.ui.screens.ProfileScreen
 import com.myuptm.ui.screens.SettingsScreen
 import com.myuptm.ui.screens.SignInScreen
 import com.myuptm.ui.screens.TimetableScreen
+import com.myuptm.ui.screens.HelpScreen
+import com.myuptm.viewmodel.ClassManagementViewModel
 import com.myuptm.data.repository.FirestoreAbsenceLetterRepository
 import com.myuptm.data.repository.FirestoreProfileRepository
 import com.myuptm.data.repository.RealCloudinaryRepository
@@ -54,6 +56,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
+import com.myuptm.ui.components.TourSession
 
 
 /**
@@ -146,7 +149,9 @@ fun MyUptmNavHost(
                 // Sprint 13: pending-account approval park
                 isWaitingApproval = authState == AuthState.WAITING_APPROVAL,
                 waitingEmail = authViewModel.pendingEmail.collectAsState().value,
-                onCancelWait = { authViewModel.signOut() }
+                onCancelWait = { authViewModel.signOut() },
+                // Sprint 14: help entry point on the login screen.
+                onHelpClick = { navController.navigate(MyUptmRoutes.HELP) }
             )
         }
         composable(HOME) { HomeScreen(navController = navController, user = userRecord) }
@@ -202,6 +207,23 @@ fun MyUptmNavHost(
         }
         composable(MyUptmRoutes.PROFILE) {
             ProfileScreen(navController = navController, profileViewModel = sharedProfileViewModel())
+        }
+
+        composable(MyUptmRoutes.HELP) {
+            com.myuptm.ui.screens.HelpScreen(
+                user = userRecord,
+                navController = navController,
+                tourStarter = { tourRole: com.myuptm.domain.model.UserRole, startRoute: String ->
+                    // Give the target screen a frame to compose (its tourTarget
+                    // tags register on first layout), then run the tour over it.
+                    com.myuptm.ui.components.TourSession.start(tourRole)
+                    if (startRoute != MyUptmRoutes.HELP) {
+                        navController.navigate(startRoute) {
+                            popUpTo(MyUptmRoutes.HELP) { inclusive = true }
+                        }
+                    }
+                }
+            )
         }
 
         composable(MyUptmRoutes.MISSED_CLASSES) {
@@ -293,6 +315,7 @@ fun MyUptmNavHost(
         composable(MyUptmRoutes.SETTINGS) {
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
+                onHelpClick = { navController.navigate(MyUptmRoutes.HELP) },
                 onSignOut = {
                     authViewModel.signOut()
                     navController.navigate(SIGN_IN) {

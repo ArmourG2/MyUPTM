@@ -78,19 +78,20 @@ fun AddPostScreen(
         selectedImage = uri
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                title = { Text("Add Post") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+    androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
+        // Campus-photo hero banner (design language from sign-in).
+        com.myuptm.ui.components.CampusHeroBackdrop()
+        Scaffold(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            topBar = {
+                com.myuptm.ui.components.CampusHeroHeader(
+                    title = "Add Post",
+                    navigationIcon = {
+                        com.myuptm.ui.components.CampusBackButton(onBackClick)
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
+                )
+            }
+        ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -204,6 +205,7 @@ fun AddPostScreen(
                 }
             }
         }
+    }
     }
 
     // Success → close the screen (posts feed updates live).

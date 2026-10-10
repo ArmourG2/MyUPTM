@@ -1,5 +1,7 @@
 package com.myuptm.data.repository
 
+import com.myuptm.ui.components.toMinutes
+
 // Sprint 9 (owner decision): rosters are NOT wiped — they are RE-BAKED here.
 // Names + matric ids are REAL students from the owner's section lists
 // (Section01..03_List.txt), but they have NO Firebase accounts and cannot log in.
@@ -12,13 +14,18 @@ data class RosterStudent(
     val matric: String,
     val name: String,
     val verified: Int,
-    val missed: Int
+    val missed: Int,
+    // Sprint 13D (owner rule change): red/yellow thresholds are measured in
+    // MISSED HOURS now — a missed occurrence is worth the subject's average
+    // slot duration from the departmental seed (computed at construction).
+    val missedHours: Double = 0.0
 ) {
-    // Wireframe colour rule: 0 missed = Full Attendance; ≥5 missed = red; else yellow.
+    // Hours rule: 0 missed hours = Full Attendance (green); >= 5 hours = red;
+    // anything in between is yellow.
     val severity: Int get() = when {
-        missed == 0 -> 0   // green — Full Attendance
-        missed >= 5 -> 2   // red — high misses
-        else -> 1          // yellow — moderate misses
+        missedHours <= 0.0 -> 0   // green — Full Attendance
+        missedHours >= 5.0 -> 2   // red — >= 5 missed hours
+        else -> 1                 // yellow — 1 to 4 missed hours
     }
 }
 
@@ -61,23 +68,29 @@ object MockAttendanceRoster {
         subjectName: String,
         approvedLetters: Int
     ): List<RosterStudent> {
+        val hoursPerSession = averageHoursPerSession(subjectName)
         val rows = roster.mapIndexed { index, (name, matric) ->
-            if (matric == DEMO_MATRIC) demoRoster(subjectName, approvedLetters, name)
+            if (matric == DEMO_MATRIC) demoRoster(subjectName, approvedLetters, name, hoursPerSession)
             else {
                 val missed = MISSED_PATTERN[index % MISSED_PATTERN.size]
-                RosterStudent(matric, name, totalSessionsPerSubject - missed, missed)
+                RosterStudent(matric, name, totalSessionsPerSubject - missed, missed, missed * hoursPerSession)
             }
         }
         // Sections without the demo student get one appended so it is always reviewable.
         return if (rows.any { it.matric == DEMO_MATRIC }) rows else rows + demoRoster(
-            subjectName, approvedLetters, DEMO_NAME
+            subjectName, approvedLetters, DEMO_NAME, hoursPerSession
         )
     }
 
-    private fun demoRoster(subjectName: String, approvedLetters: Int, name: String): RosterStudent {
+    private fun demoRoster(
+        subjectName: String,
+        approvedLetters: Int,
+        name: String,
+        hoursPerSession: Double
+    ): RosterStudent {
         val baseMissed = DEMO_BASE_MISS_BY_SUBJECT[subjectName] ?: DEMO_BASE_MISS_BY_SUBJECT.values.first()
         val missed = (baseMissed - approvedLetters).coerceAtLeast(0)
-        return RosterStudent(DEMO_MATRIC, name, totalSessionsPerSubject - missed, missed)
+        return RosterStudent(DEMO_MATRIC, name, totalSessionsPerSubject - missed, missed, missed * hoursPerSession)
     }
 
     // Sprint 9: the three-way session status every attendance view shows —
@@ -128,6 +141,19 @@ object MockAttendanceRoster {
         studentId?.takeIf { it.isNotBlank() }?.let { return it }
         val digits = UPTM_EMAIL_MATRIC.find(email.orEmpty())?.groupValues?.get(1)
         return digits?.let { "AM$it" }
+    }
+
+    // Sprint 13D: hours-rule helper — how many HOURS one missed occurrence of a
+    // subject costs (the seed's average slot duration; fallback 2 h for subjects
+    // that are not on the departmental board).
+    fun averageHoursPerSession(subjectName: String): Double {
+        val slots = SeedTimetableRepository().getWeeklyTimetable()
+            .filter { it.subjectName.equals(subjectName, ignoreCase = true) }
+        if (slots.isEmpty()) return 2.0
+        val totalMinutes = slots.sumOf { s ->
+            (s.endTime.toMinutes() - s.startTime.toMinutes()).coerceAtLeast(0)
+        }
+        return totalMinutes.toDouble() / slots.size / 60.0
     }
 
     fun isEnrolledDemoStudent(studentId: String?, email: String?): Boolean {
